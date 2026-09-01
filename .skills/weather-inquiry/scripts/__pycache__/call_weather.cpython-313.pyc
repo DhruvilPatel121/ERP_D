@@ -1,0 +1,83 @@
+�
+
+��sjd����SrSSKrSSKrSSKrSSKrSSKrSSKrSSKrSr	Sr
+SrSrSr
+SrS	rS
+rSrSrS
+r\S:Xa\"5 gg)atCall the OpenWeather One Call 3.0 and Weather Assistant APIs and print JSON.
+
+Endpoints are selected via --endpoint:
+    onecall            - current weather + forecast (GET)
+    timemachine        - historical weather at a timestamp (GET)
+    day_summary        - aggregated daily summary (GET)
+    overview           - human-readable weather overview (GET)
+    assistant_create   - start a conversational weather assistant session (POST)
+    assistant_continue - continue an assistant session (POST)
+
+Reads INTEGRATIONS_API_KEY from the environment and sends it via the
+X-Gateway-Authorization header with a "Bearer " prefix.
+�Nz@https://api-wL1zlmgJGAlY@api.openweathermap.org/data/3.0/onecallzLhttps://api-Aa2PZmgJq5OL@api.openweathermap.org/data/3.0/onecall/timemachinezLhttps://api-2Y00zmgJ8lBY@api.openweathermap.org/data/3.0/onecall/day_summaryzIhttps://api-oYA6ZxVqenDa@api.openweathermap.org/data/3.0/onecall/overviewzAhttps://api-79jKPlpvAJ0L@api.openweathermap.org/assistant/sessionzAhttps://api-oYA6ZxVqyK8a@api.openweathermap.org/assistant/sessionc�`�[U[RS9 [R"S5 g)zAPrint an error message to stderr and exit with a non-zero status.)�file�N)�print�sys�stderr�exit)�messages �'weather-inquiry/scripts/call_weather.py�failr!s��	�'��
+�
+�#��H�H�Q�K�c�N�[R"SS9nURSS/SQSS9 URS[S	S
+9 URS[SS
+9 URS
+SS9 URSSS9 URS/SQSS9 URSSS9 URSSS9 URSSS9 URSSSS9 URS [S!S"S#9 UR5nS$nURU;a�URb
+URcURS%UR-5 URS&:Xa"UR(dURS'5 URS(:Xa"UR(dURS)5 U$URS*:Xa$UR(dURS+5 U$URS,:XaDUR(dURS-5 UR(dURS.5 U$)/zParse command line arguments.z8Query OpenWeather One Call 3.0 / Weather Assistant APIs.)�descriptionz
+--endpointT)�onecall�timemachine�day_summary�overview�assistant_create�assistant_continuezwhich API endpoint to call)�required�choices�helpz--latz%latitude (required for GET endpoints))�typerz--lonz&longitude (required for GET endpoints)z--dtz Unix timestamp (for timemachine))rz--datez(date string YYYY-MM-DD (for day_summary)z--units)�standard�metric�imperialzunit system)rrz--langzlanguage code for output textz	--excludezIcomma-separated sections to exclude: current,minutely,hourly,daily,alertsz	--messagez/user message (required for assistant endpoints)z--session-id�
+session_idz,existing session ID (for assistant_continue))�destrz	--timeoutiXz)request timeout in seconds (default: 600))r�defaultr)rrrrz2--lat and --lon are required for the '%s' endpointrz/--dt is required for the 'timemachine' endpointrz1--date is required for the 'day_summary' endpointrz9--message is required for the 'assistant_create' endpointrz>--session-id is required for the 'assistant_continue' endpointz;--message is required for the 'assistant_continue' endpoint)�argparse�ArgumentParser�add_argument�float�int�
+parse_args�endpoint�lat�lon�error�dt�dater
+r)�p�args�
+get_endpointss   rr%r%'s������,f�g�A��N�N�<�$�F�4��6�
+�N�N�7��-T�N�U��N�N�7��-U�N�V��N�N�6� B�N�C��N�N�8�"L�N�M��N�N�9�&H�}�N�]��N�N�8�"A�N�B��N�N�;�%p�N�q��N�N�;�%V�N�W��N�N�>��;i�N�j��N�N�;�S�#�<g�N�h��<�<�>�D�I�M��}�}�
+�%��8�8��t�x�x�/�
+�G�G�H�4�=�=�X�Y��=�=�M�)�$�'�'�
+�G�G�E�F��=�=�M�)�$�)�)�
+�G�G�G�H��K�
+���,�	,��|�|�
+�G�G�O�P��K�
+���.�	.����
+�G�G�T�U��|�|�
+�G�G�Q�R��Kr
+c���URS:Xa[nO4URS:Xa[nOURS:Xa[nO[nUR
+URS.nUR(aURUS'UR(aURUS'UR(aURUS'UR(aURUS'UR(aURUS	'US
+-[RRU5-n[RR!USSS
+U-S.S9$)z9Build a GET request for the One Call family of endpoints.rrr)r'r(r*r+�units�lang�exclude�?�GET�application/json�Bearer )�Accept�X-Gateway-Authorization)�method�headers)r&�ONECALL_URL�TIMEMACHINE_URL�DAY_SUMMARY_URL�OVERVIEW_URLr'r(r*r+r0r1r2�urllib�parse�	urlencode�request�Request)r-�api_key�base_url�params�urls     r�build_get_requestrHPs���}�}�	�!���	
+���-�	'�"��	
+���-�	'�"�����X�X�d�h�h�
+/�F��w�w��w�w��t���y�y�����v���z�z��*�*��w���y�y�����v���|�|� �L�L��y��
+�S�.�6�<�<�1�1�&�9�
+9�C��>�>�!�!���(�'0�7�':�
+�"��r
+c	���URS:Xa5[nSUR0nUR(aURUS'OA[S-[
+RRUR5-nSUR0n[R"USS9RS5n[
+RRUUSS	S	S
+U-S.S9$)
+z9Build a POST request for the Weather Assistant endpoints.rr
+r0�/F)�ensure_ascii�utf-8�POSTr5r6)zContent-Typer7r8)�datar9r:)r&�ASSISTANT_CREATE_URLr
+r0�ASSISTANT_CONTINUE_URLr?r@�quoter�json�dumps�encoderBrC)r-rDrG�bodyrNs     r�build_post_requestrVrs����}�}�*�*�"���4�<�<�(���:�:� �J�J�D��M��$�s�*�V�\�\�-?�-?����-P�P���4�<�<�(���:�:�d��/�6�6�w�?�D��>�>�!�!��
+��.�(�'0�7�':�
+�	"�	�	r
+c���[5n[RRS5nU(d[	S5 UR
+S;a[
+X5nO[X5n[RRX RS9nUR5RSSS9nSSS5 [*R,"W5n[1[*R2"SWS.SSS95 g!,(df   NH=f![RRaEnUR5RSSS9n[	S	UR <S
+U<35 SnAN�SnAf[RR"a+n[	S[%UR&5-5 SnAN�SnAf[(a [	S5 GNf=f![*R.a"n[	S
+[%U5-5 SnAGN)SnAff=f)zJEntry point: call the selected weather endpoint and print the result JSON.�INTEGRATIONS_API_KEYz INTEGRATIONS_API_KEY is required)rr)�timeoutrL�replace)�errorsNzHTTP z: zRequest failed: zRequest timed outz%Invalid JSON response from upstream: �succeed)�status�resultF)�,�:)rK�
+separators)r%�os�environ�getrr&rVrHr?rB�urlopenrY�read�decoder)�	HTTPError�code�URLError�str�reason�TimeoutErrorrR�loads�JSONDecodeErrorrrS)r-rD�req�response�raw�exc�detailr^s        r�mainru�s{���<�D��j�j�n�n�3�4�G���
+/�0��}�}�B�B� ��/����.��	"�
+�^�^�
+#�
+#�C���
+#�
+>�(��-�-�/�(�(���(�C�C�?�A����C���
+�$�*�*���/�����?�
+>���<�<�!�!�1�����"�"�7�9�"�=���c�h�h��
+/�0�0���<�<� � �3��
+�#�c�j�j�/�
+1�2�2���"��
+ �!�"��
+���A��
+4�s�3�x�
+?�@�@��A�s`�$'C=�C,�*C=�3G�,
+C:�6C=�:C=�=F>�;E�!F>�<!F"�"F>�=F>�G7�G2�2G7�__main__)�__doc__r rRrbr�urllib.errorr?�urllib.parse�urllib.requestr;r<r=r>rOrPrr%rHrVru�__name__�r
+r�<module>r}st�����	�
+����Q��`��`��Z��Z��\���&�R�D�0!�H�z���F�r

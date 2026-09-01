@@ -1,0 +1,112 @@
+�
+
+��sj=����SrSSKrSSKrSSKrSSKrSSKrSSKrSSKrSSK	rSr
+SrSrSr
+SrSrS	rS
+rSr\S:Xa\"5 gg)
+acCall the OCR.space API and print the parsed OCR result as JSON.
+
+Two modes are supported:
+
+1. URL mode  (--url):  GET /parse/imageurl with query parameters
+2. File mode (--file): POST /parse/image with a multipart/form-data body
+
+Reads INTEGRATIONS_API_KEY from the environment and sends it via the
+X-Gateway-Authorization header with a "Bearer " prefix.
+�Nz5https://api-m9xKXDbRplNa@api.ocr.space/parse/imageurlz2https://api-W9z3M6eONl3L@api.ocr.space/parse/imagec�`�[U[RS9 [R"S5 g)zAPrint an error message to stderr and exit with a non-zero status.)�file�N)�print�sys�stderr�exit)�messages �#ocr-space/scripts/call_ocr_space.py�failrs��	�'��
+�
+�#��H�H�Q�K�c��[R"SS9nURSS9nURSSS9 URSS	S9 URS
+SSS
+9 URSSS/SSS9 URSSSS9 URSSSS9 URSSSS9 URSSSSS9 URSS SS!S9 URS"S#SS$S9 URS%S&S9 URS'[S(S)S*9 UR5$)+zParse command line arguments.z<Run OCR on an image URL or a local image file via OCR.space.)�descriptionT)�requiredz--urlz8image URL to OCR (uses the GET /parse/imageurl endpoint))�helpz--filez;local image file path (uses the POST /parse/image endpoint)z
+--language�engz OCR language code (default: eng))�defaultrz--engine�1�2zOCR engine: 1 or 2 (default: 1))�choicesrrz	--overlay�
+store_truez%include word/line overlay coordinates)�actionrz--tablezenable table recognitionz--scalez-enable auto-scaling for low-resolution imagesz--detect-orientation�detect_orientationz)auto-detect and correct image orientation)�destrrz--searchable-pdf�searchable_pdfz-return a searchable PDF instead of plain textz--hide-text-layer�hide_text_layerz3hide the text layer in the generated searchable PDFz
+--filetypez5override file type detection: PDF/GIF/PNG/JPG/TIF/BMPz	--timeoutiXz)request timeout in seconds (default: 600))�typerr)�argparse�ArgumentParser�add_mutually_exclusive_group�add_argument�int�
+parse_args)�p�groups  rr#r#!s<�����,j�k�A�
+�*�*�D�*�9�E�	���w�%_��`�	���x�&c��d��N�N�<��5W�N�X��N�N�:��S�z�3�Ef�N�g��N�N�;�|�:a�N�b��N�N�9�\�8R�N�S��N�N�9�\�8g�N�h��N�N�)�0D�\�C��E��N�N�%�,<�\�G��I��N�N�&�->�|�M��O��N�N�<�&]�N�^��N�N�;�S�#�<g�N�h��<�<�>�r
+c���URURUR[UR5R5[UR5R5[UR5R5[UR5R5[UR5R5[UR5R5S.	nUR(aURUS'[S-[RRU5-n[R R#USSSU-0S9nU$)z!Build a GET request for URL mode.)	�url�language�	OCREngine�isOverlayRequired�isTable�scale�detectOrientation�isCreateSearchablePdf�isSearchablePdfHideTextLayer�filetype�?�GET�X-Gateway-Authorization�Bearer )�method�headers)r'r(�engine�str�overlay�lower�tabler,rrrr0�URL_ENDPOINT�urllib�parse�	urlencode�request�Request)�args�api_key�paramsr'�reqs     r�build_url_requestrF7s���x�x��M�M��[�[� ����.�4�4�6��t�z�z�?�(�(�*��T�Z�Z��&�&�(� ��!8�!8�9�?�?�A�!$�T�%8�%8�!9�!?�!?�!A�(+�D�,@�,@�(A�(G�(G�(I�
+�F��}�}�!�]�]��z��
+��
+�v�|�|�5�5�f�=�
+=�C�
+�.�.�
+ �
+ ���%�y�7�':�
+�!��C��Jr
+c�8�UR5nURS5(agURS5(agURS5(agURS5(agURS	5(ag
+URS5(agg
+)z*Guess the MIME type of a local image file.)z.jpgz.jpegz
+image/jpegz.pngz	image/pngz.gifz	image/gifz.bmpz	image/bmp)z.tifz.tiffz
+image/tiffz.pdfzapplication/pdfzapplication/octet-stream)r:�endswith)�pathr:s  r�guess_content_typerJQs~���J�J�L�E��~�~�'�(�(���~�~�f�����~�~�f�����~�~�f�����~�~�'�(�(���~�~�f��� �%r
+c�T�S[[[R"5S-55-nSn/nUR5HEup�U	cM
+UR	SU-U-S-U-S-U-U-U	-U-RS55 MG UbZSU-U-S-U-S-U-S-U-S	-U-U-U-RS5n
+UR	X�-URS5-5 UR	SU-S-U-RS55 S
+R
+U5nSU-nX�4$)z>Hand-build a multipart/form-data body (standard library only).z----OcrSpaceBoundaryi�z
+z--z&Content-Disposition: form-data; name="�"�utf-8z
+"; filename="zContent-Type: r
+zmultipart/form-data; boundary=)r8r"�time�items�append�encode�join)
+�fields�
+file_field�filename�file_content_type�
+file_bytes�boundary�crlf�parts�name�value�header�body�content_type_headers
+             r�build_multipart_bodyr`cs��%��C��	�	��d�0B�,C�(D�D�H��D��E��|�|�~����=��
+���
+�H�_�t�
+#�
+5�6�8<�=�?B�C�EI�J�LP�Q�
+����!�6�'�?�	
+�&����8�O�d�"�4�
+5�7A�
+B�DS�
+T�V^�
+_�ad�
+e�gk�
+l��
+�0�
+1�37�
+8�:>�
+?��&��/�		�
+	���V�(�4�;�;�w�+?�?�@�	�L�L�$��/�D�(�4�/�7�7��@�A��8�8�E�?�D�:�X�E���$�$r
+c
+���URn[RRU5(d[	SU-5 [US5nUR
+5nSSS5 [RRU5n[U5nURUR[UR5R5[UR5R5[UR5R5[UR 5R5[UR"5R5[UR$5R5S.nUR&(aUR&US'[)USXVW5up�[*R,R/[0USU	SU-S	.S
+9n
+U
+$!,(df   GNz=f)z3Build a POST multipart request for local file mode.zFile not found: �rbN)r(r)r*r+r,r-r.r/r0r�POSTr4)zContent-Typer3)�datar5r6)r�osrI�isfiler�open�read�basenamerJr(r7r8r9r:r;r,rrrr0r`r=r@rA�
+FILE_ENDPOINT)rBrC�filepath�frWrU�content_typerSr^�ctrEs           r�build_file_requestro�sl���y�y�H�
+�7�7�>�>�(�#�#��
+�(�
+*�+�	
+�h��	���V�V�X�
+�
+��w�w����)�H�%�h�/�L��M�M��[�[� ����.�4�4�6��t�z�z�?�(�(�*��T�Z�Z��&�&�(� ��!8�!8�9�?�?�A�!$�T�%8�%8�!9�!?�!?�!A�(+�D�,@�,@�(A�(G�(G�(I�	�F��}�}�!�]�]��z��#�F�F�H�J�W�H�D�
+�.�.�
+ �
+ ��
+���'0�7�':�
+�	!��C��J�;
+�	�s�G�
+Gc���[5n[RRS5nU(d[	S5 UR
+(a[
+X5nO[X5n[RRX RS9nUR5RSSS9nSSS5 [*R,"W5n[1[*R2"S
+WS.SSS95 g!,(df   NH=f![RRaEnUR5RSSS9n[	SUR <S	U<35 SnAN�SnAf[RR"a+n[	S
+[%UR&5-5 SnAN�SnAf[(a [	S5 GNf=f![*R.a"n[	S[%U5-5 SnAGN)SnAff=f)z6Entry point: call OCR.space and print the result JSON.�INTEGRATIONS_API_KEYz INTEGRATIONS_API_KEY is required)�timeoutrM�replace)�errorsNzHTTP z: zRequest failed: zRequest timed outz%Invalid JSON response from upstream: �succeed)�status�resultF)�,�:)�ensure_ascii�
+separators)r#re�environ�getrr'rFror=r@�urlopenrrrh�decode�error�	HTTPError�code�URLErrorr8�reason�TimeoutError�json�loads�JSONDecodeErrorr�dumps)rBrCrE�response�raw�exc�detailrws        r�mainr��su���<�D��j�j�n�n�3�4�G���
+/�0��x�x���.�� ��/��	"�
+�^�^�
+#�
+#�C���
+#�
+>�(��-�-�/�(�(���(�C�C�?�A����C���
+�$�*�*���/�����?�
+>���<�<�!�!�1�����"�"�7�9�"�=���c�h�h��
+/�0�0���<�<� � �3��
+�#�c�j�j�/�
+1�2�2���"��
+ �!�"��
+���A��
+4�s�3�x�
+?�@�@��A�s`�%'C>�C-�+C>�4G�-
+C;�7C>�;C>�>F?�;E�!F?�=!F#�#F?�>F?�G8�G3�3G8�__main__)�__doc__rr�rerrN�urllib.errorr=�urllib.parse�urllib.requestr<rjrr#rFrJr`ror��__name__�r
+r�<module>r�sj��	���	�
+�����G��D�
+���,�4&�$%�:"�J!�H�z���F�r

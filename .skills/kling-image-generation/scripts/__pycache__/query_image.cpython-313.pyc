@@ -1,0 +1,85 @@
+�
+
+��sj�����SrSSKrSSKrSSKrSSKrSSKrSSKrSSKrSSK	rSr
+SrSrSr
+SrSrS	rS
+rSrSrS
+r\S:Xa\"5 gg)a�
+Poll an already-submitted Kling image generation task by task_id (does NOT submit a new task).
+
+Use this when generate_image.py returned {"status": "processing", "task_id": "..."}.
+
+Exit codes:
+    0 - success, prints JSON:
+        {"status":"succeed","task_id":"...","images":[{"url":"...","file":"/path"}]}
+        or, if not finished within the safe time limit:
+        {"status":"processing","task_id":"..."}
+    1 - API or argument error
+�NzHhttps://api-M9v0wzOkZXGY@api-singapore.klingai.com/v1/images/generations�i&c�`�[U[RS9 [R"S5 g)z3Print an error message to stderr and exit non-zero.)�file�N)�print�sys�stderr�exit)�messages �-kling-image-generation/scripts/query_image.py�failr
+s��	�'��
+�
+�#��H�H�Q�K�c�h�[RRS5nU(d[S5 U$)z5Read the API key from the environment; exit if unset.�INTEGRATIONS_API_KEYz INTEGRATIONS_API_KEY is required)�os�environ�getr
+)�keys r�api_keyr$s&��
+�*�*�.�.�/�
+0�C���
+/�0��Jrc���[RRUSSU-0SS9n[RRUSS9n[R
+"UR
+5RS55sSSS5 $!,(df   g=f![RRa@nUR
+5RSS	S
+9n[SUR<SU<35eSnAff=f)
+z7Send a GET request and return the parsed JSON response.zX-Gateway-AuthorizationzBearer �GET)�headers�method�<)�timeoutzutf-8N�replace)�errorszHTTP �: )�urllib�request�Request�urlopen�json�loads�read�decode�error�	HTTPError�RuntimeError�code)�urlr�req�resp�e�bodys      r�get_jsonr0,s���
+�.�.�
+ �
+ ��*�I��O�<��!��C�
+;�
+�^�^�
+#�
+#�C��
+#�
+4���:�:�d�i�i�k�0�0��9�:�5�
+4�
+4���<�<�!�!�;��v�v�x���w�y��9���A�F�F�D�9�:�:��;�s5�B�3B�7	B�
+B�B�B�C0�0;C+�+C0c��URS5S;a1[SURS5<SURS5<35eURSU5n[U[5(aU(d[S5eUS$U$)	z8Validate the response code and extract the data payload.r*)Nrz
+API error rr�datazTask not foundr)rr)�
+isinstance�list)r2�payloads  r�unwrapr6;sp���x�x���y�(�����&�1A�4�8�8�I�CV�W�X�X��h�h�v�t�$�G��'�4� � ���/�0�0��q�z���Nrc���URS5=(d URS5=(d 0nURS5=(d /$)z6Extract the generated image list from the task result.�task_result�
+taskResult�images)r)r2�results  r�extract_imagesr<Gs7��
+�X�X�m�
+$�
+D�����(>�
+D�"�F��:�:�h��%�2�%rc�T�U(d$UVs/sHo"RS5SS.PM sn$[R"USS9 /nUH�nURS5nURS[U55n[RR[RRU5R5S=(d Sn[RRUS	U<U<35n[RRXG5 URXGS.5 M� U$s snf)
+zRDownload result images into the output dir; return URLs only when no dir is given.r+N)r+rT)�exist_ok�indexrz.png�image_)
+rr�makedirs�len�path�splitextr�parse�urlparse�joinr �urlretrieve�append)r:�
+output_dir�img�
+downloadedr+�idx�ext�	file_paths        r�download_imagesrPMs����AG�H��#������5��H�H��K�K�
+�T�*��J����g�g�e�n���g�g�g�s�:��/���g�g���v�|�|�4�4�S�9�>�>�?��B�L�f���G�G�L�L��S�#�-F�G�	����"�"�3�2����#�9�:�
+����Is�D%c
+�H�[R"5[-n[R"5U:GaK[[[S-[
+RRU5-U55nURS5=(d URS5nUS:Xa_[U5nU(d![S[R"USS9-5e[[R"SU[Xb5S.SS95 g	US
+;aEURS5=(d URS5=(d S
+n[SU<SU<35e[R"[ 5 [R"5U:aGMK[[R"SUS.SS95 g	)zLPoll the task status until it succeeds, fails, or the safe limit is reached.�/�task_status�status�succeedz#succeed response missing images: %sF)�ensure_ascii)rT�task_idr:N)�failed�failure�task_status_msgrz
+unknown errorzTask z	 failed: �
+processing)rTrW)�time�SAFE_LIMIT_Sr6r0�QUERY_URL_BASErrE�quoterr<r)r#�dumpsrrP�sleep�POLL_INTERVAL_S)rWrrJ�deadliner2rTr:�msgs        r�	poll_taskre]s7���y�y�{�\�)�H�
+�)�)�+��
+ ��h�~��3�f�l�l�6H�6H��6Q�Q�SV�W�X�����-�(�>�D�H�H�X�,>���Y��#�D�)�F��"�#H�4�:�:�VZ�in�Ko�#o�p�p��$�*�*�$��O�TZ�Dg�h�"��
+�
+��*�*��(�(�,�-�W����)�1D�W��C��w��D�E�E��
+�
+�?�#��)�)�+��
+ � 
+�$�*�*���A�PU�
+V�Wrc�>�[R"SS9nURSSSSS9 URSS	S
+S9 UR5n[	5n[URX!R5 g![an[[U55 SnAgSnAff=f)
+zNEntry point: poll an existing image generation task and print the result JSON.z#Poll a Kling image generation task.)�descriptionz	--task-idTrWztask ID to poll)�required�dest�helpz--output-dirrJz"output directory for result images)rirjN)�argparse�ArgumentParser�add_argument�
+parse_argsrrerWrJ�	Exceptionr
+�str)�parser�argsrr.s    r�mainrsss���
+�
+$�
+$�1V�
+W�F�
+����d��IZ��[�
+����\�@d��e�����D�
+�)�C���$�,�,��_�_�5�����S��V�����s� A4�4
+B�>B�B�__main__)�__doc__rkr#rrr\�urllib.errorr�urllib.parse�urllib.requestr^rbr]r
+rr0r6r<rPrers�__name__�rr�<module>r{ss�����	�
+�����\��������;�	�&�
+� X�,��z���F�r

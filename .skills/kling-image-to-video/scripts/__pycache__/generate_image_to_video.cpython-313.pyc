@@ -1,0 +1,113 @@
+�
+
+��sj%����SrSSKrSSKrSSKrSSKrSSKrSSKrSSKrSSK	rSSK
+rSrSrSr
+SrSrSrS	rS
+rSrSrS
+rSrSrSrSrSr\S:Xa\"5 gg)aJ
+Submit a Kling image-to-video task and poll until done.
+
+Exit codes:
+    0 - success, prints JSON:
+        {"status":"succeed","task_id":"...","videos":[{"url":"...","file":"/path"}]}
+        or, if not finished within the safe time limit:
+        {"status":"processing","task_id":"..."}
+    1 - API, argument, or download error
+�NzHhttps://api-eLMlJj3KJD89@api-singapore.klingai.com/v1/videos/image2videozHhttps://api-rLobzpqX85m9@api-singapore.klingai.com/v1/videos/image2video�i&c�`�[U[RS9 [R"S5 g)z3Print an error message to stderr and exit non-zero.)�file�N)�print�sys�stderr�exit)�messages �7kling-image-to-video/scripts/generate_image_to_video.py�failr
+s��	�'��
+�
+�#��H�H�Q�K�c���[R"SS9nURSS9nURSSS9 URSS	S
+S9 URSS
+S9 URSSSS9 URSSSS9 URSSS9 URSSS9 URSSSS9 URSS[SS9 URS S!S"S9 UR5$)#zParse command line arguments.z;Submit a Kling image-to-video task and poll for the result.)�descriptionT)�requiredz--imagez!local path of the reference image)�helpz--image-url�	image_urlzURL of the reference image)�destrz--promptzpositive promptz--negative-prompt�negative_promptznegative promptz--modelz
+kling-v1-6z model name (default: kling-v1-6))�defaultrz--modez generation mode, e.g. std or proz
+--durationz'video duration in seconds, e.g. 5 or 10z--aspect-ratio�aspect_ratiozaspect ratio, e.g. 16:9, 1:1z--cfg-scale�	cfg_scalezprompt adherence [0, 1])r�typerz--output-dir�
+output_dirz"output directory for result videos)�argparse�ArgumentParser�add_mutually_exclusive_group�add_argument�float�
+parse_args)�p�groups  rr r $s������,i�j�A�
+�*�*�D�*�9�E�	���y�'J��K�	���}�;�=Y��Z��N�N�:�$5�N�6��N�N�&�->�EV�N�W��N�N�9�l�9[�N�\��N�N�8�"D�N�E��N�N�<�&O�N�P��N�N�#�.�?]�N�^��N�N�=�{��E^�N�_��N�N�>��;_�N�`��<�<�>�rc�h�[RRS5nU(d[S5 U$)z5Read the API key from the environment; exit if unset.�INTEGRATIONS_API_KEYz INTEGRATIONS_API_KEY is required)�os�environ�getr
+)�keys r�api_keyr)5s&��
+�*�*�.�.�/�
+0�C���
+/�0��Jrc���[US5n[R"UR55R	S5sSSS5 $!,(df   g=f)z3Read a local file and encode it as a Base64 string.�rb�utf-8N)�open�base64�	b64encode�read�decode)�path�fs  r�file_to_base64r4=s9��	
+�d�D�	�Q��������)�0�0��9�
+�	�	�s�3A
+�
+
+Ac�4�[R"U5RS5n[RRUUSSU-S.SS9n[RR
+USS9n[R"UR5RS55sS	S	S	5 $!,(df   g	=f![RRa@nUR5RSS
+S9n[SUR<S
+U<35eS	nAff=f)z8Send a POST JSON request and return the parsed response.r,zapplication/json�Bearer )zContent-Type�X-Gateway-Authorization�POST)�data�headers�method�<��timeoutN�replace��errors�HTTP �: )�json�dumps�encode�urllib�request�Request�urlopen�loadsr0r1�error�	HTTPError�RuntimeError�code)�urlr(�payloadr9�req�resp�e�bodys        r�	post_jsonrVCs����:�:�g��%�%�g�.�D�
+�.�.�
+ �
+ ��
+�.�'0�3��
+��!��C�;�
+�^�^�
+#�
+#�C��
+#�
+4���:�:�d�i�i�k�0�0��9�:�5�
+4�
+4���<�<�!�!�;��v�v�x���w�y��9���A�F�F�D�9�:�:��;�s6�
+B9�+3B(�	B9�(
+B6�2B9�6B9�9D�;D�Dc���[RRUSSU-0SS9n[RRUSS9n[R
+"UR
+5RS55sSSS5 $!,(df   g=f![RRa@nUR
+5RSS	S
+9n[SUR<SU<35eSnAff=f)
+z7Send a GET request and return the parsed JSON response.r7r6�GET)r:r;r<r=r,Nr?r@rBrC)rGrHrIrJrDrKr0r1rLrMrNrO)rPr(rRrSrTrUs      r�get_jsonrYWs���
+�.�.�
+ �
+ ��*�I��O�<��!��C�
+;�
+�^�^�
+#�
+#�C��
+#�
+4���:�:�d�i�i�k�0�0��9�:�5�
+4�
+4���<�<�!�!�;��v�v�x���w�y��9���A�F�F�D�9�:�:��;�s5�B�3B�7	B�
+B�B�B�C0�0;C+�+C0c��URS5S;a1[SURS5<SURS5<35eURSU5n[U[5(aU(d[S5eUS$U$)	z8Validate the response code and extract the data payload.rO)Nrz
+API error rCrr9zTask not foundr)r'rN�
+isinstance�list)r9rQs  r�unwrapr]fsp���x�x���y�(�����&�1A�4�8�8�I�CV�W�X�X��h�h�v�t�$�G��'�4� � ���/�0�0��q�z���Nrc���URUR(aURO[UR5S.nUR(aURUS'UR
+(aUR
+US'UR(aURUS'UR(aURUS'UR(aURUS'URbURUS'[[[X55nURS5=(d URS	5nU(d![S
+[R "USS9-5eU$)
+z6Submit the image-to-video task and return the task id.)�
+model_name�image�promptr�mode�durationrr�task_id�taskIdz#submit response missing task_id: %sF��ensure_ascii)�modelrr4r`rarrbrcrrr]rV�
+SUBMIT_URLr'rNrDrE)�argsr(rQr9rds     r�submit_taskrkrs���j�j�#'�>�>����~�d�j�j�7Q��G��{�{� �K�K�������%)�%9�%9��!�"��y�y��)�)�����}�}�"�m�m��
+�����"&�"3�"3�����~�~�!�#�~�~�����)�J��5�6�D��h�h�y�!�7�T�X�X�h�%7�G���@�4�:�:�d�af�Cg�g�h�h��Nrc���URS5=(d URS5=(d 0nURS5=(d /$)z6Extract the generated video list from the task result.�task_result�
+taskResult�videos)r')r9�results  r�extract_videosrq�s7��
+�X�X�m�
+$�
+D�����(>�
+D�"�F��:�:�h��%�2�%rc�t�U(d4UVs/sH&o"RS5URS5SS.PM( sn$[R"USS9 /nUH�nURS5n[U5n[RR[RRU5R5S=(d Sn[RRUS	U<U<35n[RRXX5 URXTRS5US.5 M� U$s snf)
+zRDownload result videos into the output dir; return URLs only when no dir is given.rPrcN)rPrcrT)�exist_okrz.mp4�video_)
+r'r%�makedirs�lenr2�splitextrG�parse�urlparse�joinrH�urlretrieve�append)	ror�v�
+downloaded�videorP�idx�ext�	file_paths	         r�download_videosr��s����\b�c�\b�WX���e��!�%�%�
+�2C�T�R�\b�c�c��K�K�
+�T�*��J����i�i�����*�o���g�g���v�|�|�4�4�S�9�>�>�?��B�L�f���G�G�L�L��S�#�-F�G�	����"�"�3�2����#�9�9�Z�3H�R[�\�]�
+����ds�-D5c
+�H�[R"5[-n[R"5U:GaK[R"[5 [	[[S-[RRU5-U55nURS5=(d URS5nUS:Xa_[U5nU(d![S[R"USS9-5e[[R"SU[!Xb5S.SS95 g	US
+;aEURS5=(d URS5=(d S
+n[SU<SU<35e[R"5U:aGMK[[R"SUS.SS95 g	)zLPoll the task status until it succeeds, fails, or the safe limit is reached.�/�task_status�status�succeedz#succeed response missing videos: %sFrf)r�rdroN)�failed�failure�task_status_msgrz
+unknown errorzTask z	 failed: �
+processing)r�rd)�time�SAFE_LIMIT_S�sleep�POLL_INTERVAL_Sr]rY�QUERY_URL_BASErGrx�quoter'rqrNrDrErr�)rdr(r�deadliner9r�ro�msgs        r�	poll_taskr��s7���y�y�{�\�)�H�
+�)�)�+��
+ ��
+�
+�?�#��h�~��3�f�l�l�6H�6H��6Q�Q�SV�W�X�����-�(�>�D�H�H�X�,>���Y��#�D�)�F��"�#H�4�:�:�VZ�in�Ko�#o�p�p��$�*�*�$��O�TZ�Dg�h�"��
+�
+��*�*��(�(�,�-�W����)�1D�W��C��w��D�E�E��)�)�+��
+ � 
+�$�*�*���A�PU�
+V�Wrc���[5n[5n[X5n[X!UR5 g![
+an[
+[U55 SnAgSnAff=f)zQEntry point: submit and poll the image-to-video task, then print the result JSON.N)r r)rkr�r�	Exceptionr
+�str)rjr(rdrTs    r�mainr��sJ���<�D�
+�)�C���d�(���'����0�����S��V�����s�!8�
+A �A�A �__main__)�__doc__rr.rDr%rr��urllib.errorrG�urllib.parse�urllib.requestrir�r�r�r
+r r)r4rVrYr]rkrqr�r�r��__name__�rr�<module>r�s���	��
+��	�
+�����X�
+�[��������"�:�;�(;�	��2&�
+� X�,��z���F�r

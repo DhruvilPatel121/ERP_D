@@ -1,0 +1,119 @@
+�
+
+��sj����SrSSKrSSKrSSKrSSKrSSKrSSKrSSKrSSKrSSK	r
+SSKr
+SrSr
+SrSrSrS\S	\S
+\S\4SjrS
+\S\4SjrS	\S\4SjrS	\S\S\4SjrS\S\S\S-4SjrSr\S:Xa\"5 gg)a�
+Submit an image generation task and poll until done.
+
+Usage:
+    # Text to image
+    python3 generate_image.py --prompt "..." [--output /path/to/output.png]
+
+    # Image editing / multi-image input
+    python3 generate_image.py --prompt "..." --image /path/a.png --image /path/b.jpg         [--output /path/to/output.png]
+
+Environment:
+    INTEGRATIONS_API_KEY - platform-injected API key (required)
+
+Exit codes:
+    0 - success, prints JSON:
+        {"status": "succeed", "task_id": "...", "file": "<path or null>"}
+        or, if not finished within the safe time limit:
+        {"status": "processing", "task_id": "..."}
+    1 - API or argument error
+�NzZhttps://api-zYkZzKQJrBdL@99m69ns3p05a0.cfc-execute.bj.baidubce.com/image-generation/submitzXhttps://api-GYX1lzGw0DQa@5x8hhdnyzaxqy.cfc-execute.bj.baidubce.com/image-generation/task�i&c���[R"SS9nURSSSS9 URSS/S	S
+9 URSSS
+9 URS[SSS9 UR	5$)zParse command-line arguments.z)Submit and poll an image generation task.)�descriptionz--promptTz%Text prompt for generation or editing)�required�helpz--image�appendz2Local image file path (repeatable for multi-image))�action�defaultrz--outputz1Local path to save the generated image (optional))rz	--timeoutiXz Timeout in seconds (default 600))�typer
+r)�argparse�ArgumentParser�add_argument�int�
+parse_args)�ps �generate_image.pyrr+sm�����,W�X�A��N�N�:��3Z�N�[��N�N�9�X�r�@t�N�u��N�N�:�$W�N�X��N�N�;�S�#�<^�N�_��<�<�>���url�api_key�payload�returnc�
+�[RRU[R"U5R5SSU3S.SS9n[RR
+U5n[R"UR55sSSS5 $!,(df   g=f![RRaenUR5RSS9n[S	URS
+U3[RS9 [R "S5 SnAgSnAf[RR"a;n[S
+U3[RS9 [R "S5 SnAgSnAff=f)z8Send a POST request and return the parsed JSON response.zapplication/jsonzBearer )zContent-TypezX-Gateway-Authorization�POST)�data�headers�methodN�replace)�errorszHTTP z: ��file�zNetwork error: )�urllib�request�Request�json�dumps�encode�urlopen�loads�read�error�	HTTPError�decode�print�code�sys�stderr�exit�URLError)rrr�req�resp�e�bodys       r�request_jsonr85s��
+�.�.�
+ �
+ ��
+�Z�Z��
+ �
+'�
+'�
+)�.�)0��	�':�
+��!��C�	�
+�^�^�
+#�
+#�C�
+(�D��:�:�d�i�i�k�*�)�
+(�
+(���<�<�!�!���v�v�x���i��0��
+��a�f�f�X�R��v�&�S�Z�Z�8���������<�<� � ��
+���s�#�#�*�*�5���������sC�
+B(�)$B�
+	B(�
+B%�!B(�%B(�(F�AD&�&!F�1E=�=F�pathc�L�[R"U5upUS;a(UR5RS5(aSOSn[	US5n[
+R"UR55R5nSSS5 SUWS.0$!,(df   N=f)	zHRead a local image and encode it as an inline_data part for the request.>�	image/png�
+image/jpeg�
+image/webpz.pngr;r<�rbN�inline_data)�	mime_typer)	�	mimetypes�
+guess_type�lower�endswith�open�base64�	b64encoder*r-)r9�mime�_�frs     r�
+image_partrKLs����"�"�4�(�G�D��<�<�"�j�j�l�3�3�F�;�;�{���	
+�d�D�	�Q��������)�0�0�2��
+���t�<�=�=�
+�	�s�3B�
+B#c���SUR0/nURSUR55 [[USSU0/05nURS05RS5=(d URS5nU(dD[
+S[R"USS	93[RS
+9 [R"S5 U$)z8Submit the image generation task and return the task ID.�textc3�8# �UHn[U5v� M g7f)N)rK)�.0r9s  r�	<genexpr>�submit.<locals>.<genexpr>Ys���9�j�d��D�!�!�j�s��contents�partsr�taskIdzSubmit failed: F��ensure_asciirr!)�prompt�extend�imager8�
+SUBMIT_URL�getr.r%r&r0r1r2)r�argsrS�d�task_ids     r�submitr_Vs����d�k�k�
+"�#�E�	�L�L�9�d�j�j�9�9��Z��:��%�8H�7I�*J�K�A��e�e�F�B��#�#�H�-�@����x��G��
+���
+�
+�1�5� A�B�C�#�*�*�U�������Nrr^c�H�[[USU05RS05$)z4Query the current status and result of a given task.rTr)r8�	QUERY_URLr[)rr^s  r�queryrbbs#���	�7�X�w�,?�@�D�D�V�R�P�Prr�outputc�d�USSSSSSSn[R"SU5nU(dg[
+R"URS	55n[US
+5nURU5 SSS5 U$![[[4a gf=f!,(df   U$=f)z�Extract the base64 image from the result and save to file.
+
+The result format is:
+    candidates[0].content.parts[0].text == "![image](data:image/jpeg;base64,...)"
+Returns the output file path on success, None otherwise.
+�result�
+candidatesr�contentrSrMNz7!\[.*?\]\(data:image/[^;]+;base64,([A-Za-z0-9+/=\s]+)\)r!�wb)
+�KeyError�
+IndexError�	TypeError�re�searchrF�	b64decode�grouprE�write)rrcrM�match�	img_bytesrJs      r�extract_and_save_imagersgs�����H�~�l�+�A�.�y�9�'�B�1�E�f�M��
+
+�I�I�P�RV�W�E���� � ����Q��0�I�	
+�f�d�	�q�	���	��
+��M��
+�j�)�,�����
+�	��M�s�B�)B �B�B� 
+B/c���[5n[RRSS5nU(d.[	S[
+RS9 [
+R"S5 [X5n[URS-
+[5n[R"5n[R"5U-
+U:Ga
+[R"[5 [X5nURS5nUS:XaKS	nUR (a[#XPR 5n[	[$R&"S
+X'S.55 g	US;aaURS
+5=(d [$R&"USS9n[	SUSU3[
+RS9 [
+R"S5 [R"5U-
+U:aGM
+[	[$R&"SUS.55 g	)zLEntry point: submit the task, poll until completion or timeout, output JSON.�INTEGRATIONS_API_KEY�zINTEGRATIONS_API_KEY not setrr!�2�status�SUCCESSN�succeed)rxr^r )�FAILED�TIMEOUTr+FrUz
+Task failed (z): �
+processing)rxr^)r�os�environr[r.r0r1r2r_�min�timeout�SAFE_LIMIT_S�time�sleep�POLL_INTERVAL_Srbrcrsr%r&)	r\rr^�
+safe_limit�startrrx�	file_path�err_msgs	         r�mainr�~sQ���<�D��j�j�n�n�3�R�8�G��
+�,�3�:�:�>�������W�#�G��T�\�\�B�&��5�J��I�I�K�E�
+�)�)�+��
+�
+�
+*��
+�
+�?�#��W�&�����(�#���Y���I��{�{�2�4���E�	��$�*�*�	�g�Y�Z�[���*�*��h�h�w�'�O�4�:�:�d��+O�G��M�&���W�I�6�S�Z�Z�H��H�H�Q�K��)�)�+��
+�
+�
+*� 
+�$�*�*���A�
+B�Cr�__main__)�__doc__r~r0r%r�rlrFrAr�urllib.requestr"�urllib.errorrZrar�r�r�str�dictr8rKr_rbrsr��__name__�rr�<module>r�s����,
+�
+���	�
+�����j�
+�f�	�������c��C��$��4��.>�S�>�T�>�	�C�	�#�	�Q�3�Q��Q��Q�
+���s��s�T�z��.D�<�z���F�r
