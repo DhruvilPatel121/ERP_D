@@ -2,9 +2,13 @@
   "name": "miaoda-react-admin",
   "version": "0.0.1",
   "type": "module",
+  "main": "electron/main.ts",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "electron:dev": "concurrently \"pnpm dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "pnpm build && electron-builder",
+    "electron:build:win": "pnpm build && electron-builder --win",
     "lint": "tsgo -p tsconfig.check.json; npx biome lint; .rules/check.sh;npx tailwindcss -i ./src/index.css -o /dev/null 2>&1 | grep -E '^(CssSyntaxError|Error):.*' || true;.rules/testBuild.sh"
   },
   "dependencies": {
@@ -40,6 +44,7 @@
     "@sentry/react": "^9.47.1",
     "@supabase/supabase-js": "2.103.1",
     "axios": "^1.13.1",
+    "better-sqlite3": "^13.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -80,18 +85,21 @@
   "devDependencies": {
     "@biomejs/biome": "2.4.5",
     "@tailwindcss/container-queries": "^0.1.1",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/bmapgl": "^0.0.7",
     "@types/lodash": "^4.17.24",
     "@types/react": "^19.2.2",
-    "@types/react-dom": "^19.2.2",
-    "@types/video-react": "^0.15.8",
     "@typescript/native-preview": "7.0.0-dev.20260514.1",
     "@vitejs/plugin-react": "^5.1.4",
     "autoprefixer": "^10.4.27",
+    "concurrently": "^10.0.5",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.11",
     "typescript": "~5.9.3",
     "vite": "npm:rolldown-vite@latest",
-    "vite-plugin-svgr": "^4.5.0"
+    "vite-plugin-svgr": "^4.5.0",
+    "wait-on": "^9.1.0"
   }
 }
