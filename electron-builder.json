@@ -1,12 +1,13 @@
 {
-  "appId": "com.erp.desktop",
-  "productName": "ERP Desktop",
+  "appId": "com.aaradhana.silver.erp",
+  "productName": "Aaradhana Silver ERP",
   "directories": {
     "output": "release"
   },
   "files": [
     "dist/**/*",
-    "electron/**/*",
+    "electron/dist/**/*",
+    "electron/preload.cjs",
     "package.json"
   ],
   "win": {
@@ -24,5 +25,5 @@
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true
   },
-  "asar": true
+  "asar": false
 }

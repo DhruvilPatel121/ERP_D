@@ -86,6 +86,10 @@ export interface MicroDiamond {
   individualWeight: number | null;
   weightUnit: string;
   stonesPerGram: number | null;
+  quantity: number; // remaining quantity in stock
+  totalQuantity: number; // total quantity ever added (cumulative)
+  weight: number; // total weight in grams
+  price_per_1000: number; // price per 1000 stones
   supplier: string;
   notes: string;
   isActive: boolean;
@@ -99,11 +103,15 @@ export interface ADDiamond {
   stoneId: string;
   stoneName: string;
   categoryId: ID;
+  shape_id: number; // foreign key to ad_shapes
   shape: string;
   size: string; // e.g. "3x2 mm"
   length: number | null;
   width: number | null;
-  weight: number | null;
+  weight: number; // total weight in grams
+  quantity: number; // remaining quantity in stock
+  totalQuantity: number; // total quantity ever added (cumulative)
+  price_per_piece: number; // price per piece
   supplier: string;
   notes: string;
   isActive: boolean;
@@ -248,9 +256,19 @@ export interface Order {
   karigarAssignments: KarigarAssignment[];
   attachments: OrderAttachment[];
   notes: string;
+  touch: string; // Touch information for the order
   orderDate: string;
   createdAt: string;
   updatedAt: string;
+  stoneUsage?: StoneUsageRecord[]; // Track stone usage for this order
+}
+
+export interface StoneUsageRecord {
+  stoneType: 'micro' | 'ad';
+  stoneId: ID;
+  stoneName: string; // e.g., "1.30mm" or "Oval 3x2mm"
+  quantityUsed: number;
+  itemId: ID; // Reference to OrderItem
 }
 
 // Karigar

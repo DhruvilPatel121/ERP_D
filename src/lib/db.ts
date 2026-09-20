@@ -20,6 +20,7 @@ const KEYS = {
   stoneCategories: 'erp_stone_categories',
   microDiamonds: 'erp_micro_diamonds',
   adDiamonds: 'erp_ad_diamonds',
+  adShapes: 'erp_ad_shapes',
   itemCategories: 'erp_item_categories',
   patterns: 'erp_patterns',
   orders: 'erp_orders',
@@ -214,7 +215,88 @@ export function addStoneCategory(name: string, type: 'micro' | 'ad'): StoneCateg
 // ── Micro Diamonds ───────────────────────────────────────────────────────────
 
 export function getMicroDiamonds(): MicroDiamond[] {
-  return load<MicroDiamond[]>(KEYS.microDiamonds, []);
+  const stones = load<MicroDiamond[]>(KEYS.microDiamonds, []);
+  
+  // Ensure all stones have required fields populated (migration for old data)
+  let needsUpdate = false;
+  const updatedStones = stones.map(stone => {
+    let updated = false;
+    const updates: Partial<MicroDiamond> = {};
+    
+    // Ensure quantity field exists
+    if (stone.quantity === undefined || stone.quantity === null) {
+      updates.quantity = 0;
+      updated = true;
+    }
+    
+    // Ensure totalQuantity field exists (migration for old data)
+    if (stone.totalQuantity === undefined || stone.totalQuantity === null) {
+      updates.totalQuantity = stone.quantity || 0;
+      updated = true;
+    }
+    
+    // Fix invalid cases where totalQuantity is 0 but quantity is > 0
+    if (stone.totalQuantity === 0 && (stone.quantity || 0) > 0) {
+      updates.totalQuantity = stone.quantity || 0;
+      updated = true;
+    }
+    
+    // Fix invalid cases where totalQuantity < quantity (should never happen)
+    if (stone.totalQuantity !== undefined && stone.quantity !== undefined && stone.totalQuantity < stone.quantity) {
+      updates.totalQuantity = stone.quantity;
+      updated = true;
+    }
+    
+    // Fix cases where quantity is 0 but totalQuantity > 0 (shouldn't happen in normal flow)
+    if ((stone.quantity || 0) === 0 && (stone.totalQuantity || 0) > 0) {
+      // If totalQuantity is > 0 but quantity is 0, this might be data error
+      // Keep as is but log it - don't auto-fix as it might be intentional
+      console.warn(`Micro diamond ${stone.id} has quantity 0 but totalQuantity ${stone.totalQuantity}`);
+    }
+    
+    // Ensure weight field exists
+    if (stone.weight === undefined || stone.weight === null) {
+      updates.weight = 0;
+      updated = true;
+    }
+    
+    // Ensure price_per_1000 field exists
+    if (stone.price_per_1000 === undefined || stone.price_per_1000 === null) {
+      updates.price_per_1000 = 0;
+      updated = true;
+    }
+    
+    // Ensure categoryId exists
+    if (!stone.categoryId) {
+      updates.categoryId = '';
+      updated = true;
+    }
+    
+    // Ensure supplier exists
+    if (!stone.supplier) {
+      updates.supplier = '';
+      updated = true;
+    }
+    
+    // Ensure notes exists
+    if (!stone.notes) {
+      updates.notes = '';
+      updated = true;
+    }
+    
+    if (updated) {
+      needsUpdate = true;
+      return { ...stone, ...updates };
+    }
+    
+    return stone;
+  });
+  
+  if (needsUpdate) {
+    saveMicroDiamonds(updatedStones);
+  }
+  
+  return updatedStones;
 }
 
 export function saveMicroDiamonds(stones: MicroDiamond[]): void {
@@ -227,6 +309,7 @@ export function addMicroDiamond(stone: Omit<MicroDiamond, 'id' | 'stoneId' | 'cr
     ...stone,
     id: nanoid(),
     stoneId: `MCR-${String(stones.length + 1).padStart(4, '0')}`,
+    totalQuantity: stone.quantity, // Initialize totalQuantity with initial quantity
     createdAt: now(),
     updatedAt: now(),
   };
@@ -240,7 +323,17 @@ export function updateMicroDiamond(id: ID, updates: Partial<MicroDiamond>): Micr
   const stones = getMicroDiamonds();
   const idx = stones.findIndex((s) => s.id === id);
   if (idx < 0) return null;
-  stones[idx] = { ...stones[idx], ...updates, updatedAt: now() };
+  
+  const currentStone = stones[idx];
+  const finalUpdates = { ...updates };
+  
+  // If quantity is being increased (adding stock), add to totalQuantity
+  if (updates.quantity !== undefined && updates.quantity > (currentStone.quantity || 0)) {
+    const addedQuantity = updates.quantity - (currentStone.quantity || 0);
+    finalUpdates.totalQuantity = (currentStone.totalQuantity || 0) + addedQuantity;
+  }
+  
+  stones[idx] = { ...currentStone, ...finalUpdates, updatedAt: now() };
   saveMicroDiamonds(stones);
   return stones[idx];
 }
@@ -252,7 +345,118 @@ export function deleteMicroDiamond(id: ID): void {
 // ── AD Diamonds ───────────────────────────────────────────────────────────────
 
 export function getADDiamonds(): ADDiamond[] {
-  return load<ADDiamond[]>(KEYS.adDiamonds, []);
+  const stones = load<ADDiamond[]>(KEYS.adDiamonds, []);
+  const shapes = getADShapes();
+  
+  // Ensure all stones have required fields populated
+  let needsUpdate = false;
+  const updatedStones = stones.map(stone => {
+    let updated = false;
+    const updates: Partial<ADDiamond> = {};
+    
+    // Populate shape from shape_id if missing
+    if (!stone.shape && stone.shape_id) {
+      const shape = shapes.find(s => s.id === stone.shape_id);
+      if (shape) {
+        updates.shape = shape.shape;
+        updates.stoneName = stone.stoneName || `${shape.shape} ${stone.size}`;
+        updated = true;
+      }
+    }
+    
+    // Ensure quantity field exists (migration for old data)
+    if (stone.quantity === undefined || stone.quantity === null) {
+      updates.quantity = 0;
+      updated = true;
+    }
+    
+    // Ensure totalQuantity field exists (migration for old data)
+    if (stone.totalQuantity === undefined || stone.totalQuantity === null) {
+      updates.totalQuantity = stone.quantity || 0;
+      updated = true;
+    }
+    
+    // Fix invalid cases where totalQuantity is 0 but quantity is > 0
+    if (stone.totalQuantity === 0 && (stone.quantity || 0) > 0) {
+      updates.totalQuantity = stone.quantity || 0;
+      updated = true;
+    }
+    
+    // Fix invalid cases where totalQuantity < quantity (should never happen)
+    if (stone.totalQuantity !== undefined && stone.quantity !== undefined && stone.totalQuantity < stone.quantity) {
+      updates.totalQuantity = stone.quantity;
+      updated = true;
+    }
+    
+    // Fix cases where quantity is 0 but totalQuantity > 0 (shouldn't happen in normal flow)
+    if ((stone.quantity || 0) === 0 && (stone.totalQuantity || 0) > 0) {
+      // If totalQuantity is > 0 but quantity is 0, this might be data error
+      // Keep as is but log it - don't auto-fix as it might be intentional
+      console.warn(`AD diamond ${stone.id} has quantity 0 but totalQuantity ${stone.totalQuantity}`);
+    }
+    
+    // Ensure weight field exists
+    if (stone.weight === undefined || stone.weight === null) {
+      updates.weight = 0;
+      updated = true;
+    }
+    
+    // Ensure price_per_piece field exists
+    if (stone.price_per_piece === undefined || stone.price_per_piece === null) {
+      updates.price_per_piece = 0;
+      updated = true;
+    }
+    
+    // Ensure categoryId exists
+    if (!stone.categoryId) {
+      updates.categoryId = '';
+      updated = true;
+    }
+    
+    // Ensure supplier exists
+    if (!stone.supplier) {
+      updates.supplier = '';
+      updated = true;
+    }
+    
+    // Ensure notes exists
+    if (!stone.notes) {
+      updates.notes = '';
+      updated = true;
+    }
+    
+    if (updated) {
+      needsUpdate = true;
+      return { ...stone, ...updates };
+    }
+    
+    return stone;
+  });
+  
+  // Remove stones with no quantity (bad data) - but only if quantity is 0 AND totalQuantity is 0
+  // This removes duplicate/empty entries that shouldn't exist
+  const filteredStones = updatedStones.filter(s => {
+    // Keep if quantity is defined and not null
+    if (s.quantity === undefined || s.quantity === null) return false;
+    // Remove if both quantity and totalQuantity are 0 (likely a duplicate/empty entry)
+    if (s.quantity === 0 && (s.totalQuantity || 0) === 0) {
+      console.warn(`Removing empty AD diamond entry: ${s.id} - ${s.shape} ${s.size}`);
+      return false;
+    }
+    return true;
+  });
+  
+  if (filteredStones.length !== updatedStones.length) {
+    needsUpdate = true;
+    updatedStones.length = 0;
+    updatedStones.push(...filteredStones);
+  }
+  
+  if (needsUpdate) {
+    saveADDiamonds(updatedStones);
+  }
+  
+  return updatedStones;
 }
 
 export function saveADDiamonds(stones: ADDiamond[]): void {
@@ -261,10 +465,19 @@ export function saveADDiamonds(stones: ADDiamond[]): void {
 
 export function addADDiamond(stone: Omit<ADDiamond, 'id' | 'stoneId' | 'createdAt' | 'updatedAt'>): ADDiamond {
   const stones = getADDiamonds();
+  const shapes = getADShapes();
+  const shape = shapes.find(s => s.id === stone.shape_id);
+  
   const s: ADDiamond = {
     ...stone,
     id: nanoid(),
     stoneId: `AD-${String(stones.length + 1).padStart(4, '0')}`,
+    shape: shape?.shape || '',
+    stoneName: `${shape?.shape || ''} ${stone.size}`,
+    totalQuantity: stone.quantity, // Initialize totalQuantity with initial quantity
+    categoryId: stone.categoryId || '',
+    supplier: stone.supplier || '',
+    notes: stone.notes || '',
     createdAt: now(),
     updatedAt: now(),
   };
@@ -278,13 +491,74 @@ export function updateADDiamond(id: ID, updates: Partial<ADDiamond>): ADDiamond 
   const stones = getADDiamonds();
   const idx = stones.findIndex((s) => s.id === id);
   if (idx < 0) return null;
-  stones[idx] = { ...stones[idx], ...updates, updatedAt: now() };
+  
+  const currentStone = stones[idx];
+  const finalUpdates = { ...updates };
+  
+  // If shape_id is being updated, also update shape and stoneName
+  if (updates.shape_id !== undefined) {
+    const shapes = getADShapes();
+    const shape = shapes.find(s => s.id === updates.shape_id);
+    finalUpdates.shape = shape?.shape || '';
+    finalUpdates.stoneName = `${shape?.shape || ''} ${updates.size || currentStone.size}`;
+  }
+  
+  // If quantity is being increased (adding stock), add to totalQuantity
+  if (updates.quantity !== undefined && updates.quantity > (currentStone.quantity || 0)) {
+    const addedQuantity = updates.quantity - (currentStone.quantity || 0);
+    finalUpdates.totalQuantity = (currentStone.totalQuantity || 0) + addedQuantity;
+  }
+  
+  stones[idx] = { ...currentStone, ...finalUpdates, updatedAt: now() };
   saveADDiamonds(stones);
   return stones[idx];
 }
 
 export function deleteADDiamond(id: ID): void {
   saveADDiamonds(getADDiamonds().filter((s) => s.id !== id));
+}
+
+// ── AD Shapes ─────────────────────────────────────────────────────────────────
+
+export interface ADShape {
+  id: number;
+  shape: string;
+  created_at: string;
+}
+
+export function getADShapes(): ADShape[] {
+  return load<ADShape[]>(KEYS.adShapes, [
+    { id: 1, shape: 'Round', created_at: new Date().toISOString() },
+    { id: 2, shape: 'Heart', created_at: new Date().toISOString() },
+    { id: 3, shape: 'Tilak', created_at: new Date().toISOString() },
+    { id: 4, shape: 'Marquis', created_at: new Date().toISOString() },
+    { id: 5, shape: 'Oval', created_at: new Date().toISOString() },
+    { id: 6, shape: 'Pear', created_at: new Date().toISOString() },
+    { id: 7, shape: 'Princess', created_at: new Date().toISOString() },
+    { id: 8, shape: 'Cushion', created_at: new Date().toISOString() },
+    { id: 9, shape: 'Emerald', created_at: new Date().toISOString() },
+    { id: 10, shape: 'Radiant', created_at: new Date().toISOString() },
+  ]);
+}
+
+export function saveADShapes(shapes: ADShape[]): void {
+  save(KEYS.adShapes, shapes);
+}
+
+export function addADShape(shape: string): ADShape {
+  const shapes = getADShapes();
+  const newShape: ADShape = {
+    id: Math.max(...shapes.map(s => s.id), 0) + 1,
+    shape,
+    created_at: new Date().toISOString(),
+  };
+  shapes.push(newShape);
+  saveADShapes(shapes);
+  return newShape;
+}
+
+export function deleteADShape(id: number): void {
+  saveADShapes(getADShapes().filter((s) => s.id !== id));
 }
 
 // ── Item Categories ───────────────────────────────────────────────────────────
@@ -399,6 +673,101 @@ export function updateOrder(id: ID, updates: Partial<Order>): Order | null {
 }
 
 export function deleteOrder(id: ID): void {
+  const order = getOrderById(id);
+  if (!order) {
+    saveOrders(getOrders().filter((o) => o.id !== id));
+    return;
+  }
+
+  // Restore stones to inventory if stone usage data exists
+  if (order.stoneUsage && order.stoneUsage.length > 0) {
+    const microDiamonds = getMicroDiamonds();
+    const adDiamonds = getADDiamonds();
+
+    // Helper function to normalize size strings for comparison
+    const normalizeSize = (size: string) => {
+      if (!size) return '';
+      return size.toLowerCase()
+        .replace(/×/g, 'x')
+        .replace(/\*/g, 'x')
+        .replace(/\s*x\s*/g, 'x')
+        .replace(/\s+/g, '')
+        .trim();
+    };
+    
+    // Helper function to normalize shape strings for comparison
+    const normalizeShape = (shape: string) => {
+      if (!shape) return '';
+      return shape.toLowerCase().trim();
+    };
+
+    // Restore stones for each usage record
+    order.stoneUsage.forEach((usage) => {
+      if (usage.stoneType === 'micro') {
+        // Micro diamond stone name format: "1.30mm"
+        const sizePart = usage.stoneName.replace('mm', '').trim();
+        const micro = microDiamonds.find((m) => 
+          normalizeSize(m.size) === normalizeSize(sizePart) &&
+          m.isActive !== false
+        );
+        if (micro) {
+          // Restore quantity but cap it at the original totalQuantity
+          const originalTotal = micro.totalQuantity || micro.quantity || 0;
+          const newQuantity = Math.min((micro.quantity || 0) + usage.quantityUsed, originalTotal);
+          
+          // Direct update to avoid triggering totalQuantity increase logic
+          const stones = getMicroDiamonds();
+          const idx = stones.findIndex((s) => s.id === micro.id);
+          if (idx >= 0) {
+            stones[idx] = { 
+              ...stones[idx], 
+              quantity: newQuantity,
+              updatedAt: now()
+            };
+            saveMicroDiamonds(stones);
+          }
+          
+          console.log(`Restored ${usage.quantityUsed} ${usage.stoneName} to inventory (new qty: ${newQuantity}, total: ${originalTotal})`);
+        } else {
+          console.warn(`Could not find micro diamond for ${usage.stoneName} to restore`);
+        }
+      } else if (usage.stoneType === 'ad') {
+        // AD diamond stone name format: "Oval 3x2mm"
+        const stoneNameParts = usage.stoneName.split(' ');
+        const shape = stoneNameParts[0] || '';
+        const size = stoneNameParts.slice(1).join(' ').replace('mm', '').trim();
+        
+        const ad = adDiamonds.find((a) => 
+          normalizeSize(a.size) === normalizeSize(size) &&
+          normalizeShape(a.shape) === normalizeShape(shape) &&
+          a.isActive !== false
+        );
+        if (ad) {
+          // Restore quantity but cap it at the original totalQuantity
+          const originalTotal = ad.totalQuantity || ad.quantity || 0;
+          const newQuantity = Math.min((ad.quantity || 0) + usage.quantityUsed, originalTotal);
+          
+          // Direct update to avoid triggering totalQuantity increase logic
+          const stones = getADDiamonds();
+          const idx = stones.findIndex((s) => s.id === ad.id);
+          if (idx >= 0) {
+            stones[idx] = { 
+              ...stones[idx], 
+              quantity: newQuantity,
+              updatedAt: now()
+            };
+            saveADDiamonds(stones);
+          }
+          
+          console.log(`Restored ${usage.quantityUsed} ${usage.stoneName} to inventory (new qty: ${newQuantity}, total: ${originalTotal})`);
+        } else {
+          console.warn(`Could not find AD diamond for ${usage.stoneName} to restore`);
+        }
+      }
+    });
+  }
+
+  // Delete the order
   saveOrders(getOrders().filter((o) => o.id !== id));
 }
 
@@ -462,7 +831,26 @@ export function deleteKarigar(id: ID): void {
 // ── Pattern Dice Ranges ───────────────────────────────────────────────────────
 
 export function getPatternDiceRanges(): PatternDiceRange[] {
-  return load<PatternDiceRange[]>(KEYS.patternDiceRanges, []);
+  const ranges = load<PatternDiceRange[]>(KEYS.patternDiceRanges, []);
+  
+  // Auto-cleanup: Remove exact duplicate ranges (same karigar, same from/to)
+  const seen = new Set<string>();
+  const cleanedRanges = ranges.filter((r) => {
+    const key = `${r.karigarId}-${r.fromNumber}-${r.toNumber}`;
+    if (seen.has(key)) {
+      console.warn(`Removing duplicate range: ${r.karigarName} ${r.fromNumber}-${r.toNumber}`);
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+  
+  // If we cleaned up any duplicates, save the cleaned version
+  if (cleanedRanges.length !== ranges.length) {
+    savePatternDiceRanges(cleanedRanges);
+  }
+  
+  return cleanedRanges;
 }
 
 export function savePatternDiceRanges(ranges: PatternDiceRange[]): void {
@@ -473,6 +861,42 @@ export function addPatternDiceRange(
   range: Omit<PatternDiceRange, 'id' | 'createdAt' | 'updatedAt'>,
 ): PatternDiceRange {
   const ranges = getPatternDiceRanges();
+  
+  // Validation: Check for duplicate range for same karigar
+  const duplicateRange = ranges.find(
+    (r) => r.karigarId === range.karigarId && 
+            r.fromNumber === range.fromNumber && 
+            r.toNumber === range.toNumber
+  );
+  
+  if (duplicateRange) {
+    throw new Error(`Karigar already has range ${range.fromNumber}-${range.toNumber}`);
+  }
+
+  // Validation: Check for overlapping ranges with same karigar
+  const sameKarigarOverlap = ranges.find(
+    (r) => r.karigarId === range.karigarId && 
+            ((range.fromNumber >= r.fromNumber && range.fromNumber <= r.toNumber) ||
+             (range.toNumber >= r.fromNumber && range.toNumber <= r.toNumber) ||
+             (range.fromNumber <= r.fromNumber && range.toNumber >= r.toNumber))
+  );
+  
+  if (sameKarigarOverlap) {
+    throw new Error(`Karigar already has overlapping range ${sameKarigarOverlap.fromNumber}-${sameKarigarOverlap.toNumber}`);
+  }
+
+  // Validation: Check for overlapping ranges with different karigars
+  const differentKarigarOverlap = ranges.find(
+    (r) => r.karigarId !== range.karigarId && 
+            ((range.fromNumber >= r.fromNumber && range.fromNumber <= r.toNumber) ||
+             (range.toNumber >= r.fromNumber && range.toNumber <= r.toNumber) ||
+             (range.fromNumber <= r.fromNumber && range.toNumber >= r.toNumber))
+  );
+  
+  if (differentKarigarOverlap) {
+    throw new Error(`Range conflicts with existing range ${differentKarigarOverlap.fromNumber}-${differentKarigarOverlap.toNumber}`);
+  }
+
   const r: PatternDiceRange = { ...range, id: nanoid(), createdAt: now(), updatedAt: now() };
   ranges.push(r);
   savePatternDiceRanges(ranges);
@@ -483,7 +907,55 @@ export function updatePatternDiceRange(id: ID, updates: Partial<PatternDiceRange
   const ranges = getPatternDiceRanges();
   const idx = ranges.findIndex((r) => r.id === id);
   if (idx < 0) return null;
-  ranges[idx] = { ...ranges[idx], ...updates, updatedAt: now() };
+  
+  const updatedRange = { ...ranges[idx], ...updates, updatedAt: now() };
+  
+  // If karigarId, fromNumber, or toNumber is being updated, validate the changes
+  if (updates.karigarId !== undefined || updates.fromNumber !== undefined || updates.toNumber !== undefined) {
+    const karigarId = updatedRange.karigarId;
+    const fromNumber = updatedRange.fromNumber;
+    const toNumber = updatedRange.toNumber;
+
+    // Validation: Check for duplicate range for same karigar (excluding current range)
+    const duplicateRange = ranges.find(
+      (r) => r.karigarId === karigarId && 
+              r.fromNumber === fromNumber && 
+              r.toNumber === toNumber &&
+              r.id !== id
+    );
+    
+    if (duplicateRange) {
+      throw new Error(`Karigar already has range ${fromNumber}-${toNumber}`);
+    }
+
+    // Validation: Check for overlapping ranges with same karigar (excluding current range)
+    const sameKarigarOverlap = ranges.find(
+      (r) => r.karigarId === karigarId && 
+              r.id !== id &&
+              ((fromNumber >= r.fromNumber && fromNumber <= r.toNumber) ||
+               (toNumber >= r.fromNumber && toNumber <= r.toNumber) ||
+               (fromNumber <= r.fromNumber && toNumber >= r.toNumber))
+    );
+    
+    if (sameKarigarOverlap) {
+      throw new Error(`Karigar already has overlapping range ${sameKarigarOverlap.fromNumber}-${sameKarigarOverlap.toNumber}`);
+    }
+
+    // Validation: Check for overlapping ranges with different karigars (excluding current range)
+    const differentKarigarOverlap = ranges.find(
+      (r) => r.karigarId !== karigarId && 
+              r.id !== id &&
+              ((fromNumber >= r.fromNumber && fromNumber <= r.toNumber) ||
+               (toNumber >= r.fromNumber && toNumber <= r.toNumber) ||
+               (fromNumber <= r.fromNumber && toNumber >= r.toNumber))
+    );
+    
+    if (differentKarigarOverlap) {
+      throw new Error(`Range conflicts with existing range ${differentKarigarOverlap.fromNumber}-${differentKarigarOverlap.toNumber}`);
+    }
+  }
+  
+  ranges[idx] = updatedRange;
   savePatternDiceRanges(ranges);
   return ranges[idx];
 }

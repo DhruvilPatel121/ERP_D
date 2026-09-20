@@ -10,11 +10,14 @@ import {
   Clock,
   ArrowLeft,
   ImageDown,
+  Trash2,
+  MessageCircle,
 } from "lucide-react";
 import html2canvas from "html2canvas";
 import {
   getOrderById,
   updateOrder,
+  deleteOrder,
   getKarigars,
   getAppSettings,
   getBusinessSettings,
@@ -202,9 +205,11 @@ function KarigarAssignPanel({
 function OrderImageCard({
   order,
   ref: cardRef,
+  karigarType,
 }: {
   order: Order;
   ref: React.RefObject<HTMLDivElement>;
+  karigarType?: "wax" | "stone";
 }) {
   const appSettings = useMemo(() => getAppSettings(), []);
   const businessSettings = useMemo(() => getBusinessSettings(), []);
@@ -216,6 +221,12 @@ function OrderImageCard({
     (s, i) => s + i.calculation.totalStones,
     0,
   );
+  const totalPieces = order.items.reduce(
+    (s, i) => s + i.calculation.finishedPieces,
+    0,
+  );
+
+  const isWaxKarigar = karigarType === "wax" || !karigarType;
 
   return (
     <div
@@ -224,9 +235,9 @@ function OrderImageCard({
         position: "fixed",
         left: "-9999px",
         top: 0,
-        width: "480px",
+        width: "520px",
         background: "#fff",
-        fontFamily: "Inter, sans-serif",
+        fontFamily: "Arial, sans-serif",
         border: "2px solid #1E3A5F",
         borderRadius: "12px",
         overflow: "hidden",
@@ -242,7 +253,7 @@ function OrderImageCard({
           {businessSettings.businessName || "Silver ERP"}
         </div>
         <div style={{ fontSize: "11px", opacity: 0.7, marginTop: 2 }}>
-          Manufacturing Order
+          {isWaxKarigar ? "Wax Karigar Work Order" : "Stone Karigar Work Order"}
         </div>
       </div>
 
@@ -294,16 +305,62 @@ function OrderImageCard({
           fontSize: "13px",
         }}
       >
-        <span style={{ color: "#64748b" }}>Customer: </span>
+        <span style={{ color: "#64748b" }}>Party/Customer: </span>
         <strong style={{ color: "#1e293b" }}>{order.customerName}</strong>
-        {order.customerMobile && (
-          <span style={{ color: "#64748b", marginLeft: 8 }}>
-            · {order.customerMobile}
-          </span>
-        )}
       </div>
 
-      {/* Items */}
+      {/* Touch */}
+      {order.touch && (
+        <div
+          style={{
+            padding: "10px 20px",
+            borderBottom: "1px solid #e2e8f0",
+            fontSize: "13px",
+          }}
+        >
+          <span style={{ color: "#64748b" }}>Touch: </span>
+          <strong style={{ color: "#1e293b" }}>{order.touch}</strong>
+        </div>
+      )}
+
+      {/* Key Info for Karigars */}
+      <div
+        style={{
+          padding: "12px 20px",
+          background: "#f8fafc",
+          borderBottom: "1px solid #e2e8f0",
+        }}
+      >
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: "8px",
+            fontSize: "12px",
+          }}
+        >
+          <div>
+            <span style={{ color: "#64748b" }}>Order #: </span>
+            <strong style={{ color: "#1E3A5F" }}>{order.orderNumber}</strong>
+          </div>
+          <div>
+            <span style={{ color: "#64748b" }}>Total Pieces: </span>
+            <strong style={{ color: "#1E3A5F" }}>{totalPieces}</strong>
+          </div>
+          <div>
+            <span style={{ color: "#64748b" }}>Total Trees: </span>
+            <strong style={{ color: "#1E3A5F" }}>{totalTrees}</strong>
+          </div>
+          {!isWaxKarigar && (
+            <div>
+              <span style={{ color: "#64748b" }}>Total Stones: </span>
+              <strong style={{ color: "#B8965A" }}>{formatNumber(totalStones)}</strong>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Pattern Details */}
       <div style={{ padding: "12px 20px" }}>
         <div
           style={{
@@ -315,7 +372,7 @@ function OrderImageCard({
             marginBottom: 8,
           }}
         >
-          Order Items
+          Pattern Details
         </div>
         {order.items.map((item, i) => (
           <div
@@ -341,21 +398,21 @@ function OrderImageCard({
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1fr 1fr 1fr",
+                gridTemplateColumns: "1fr 1fr",
                 gap: 4,
                 fontSize: "11px",
                 color: "#475569",
               }}
             >
               <span>
-                Order:{" "}
+                Order Qty:{" "}
                 <b>
                   {item.orderQuantity}
                   {item.quantityType === "grams" ? "g" : " pcs"}
                 </b>
               </span>
               <span>
-                Pieces:{" "}
+                Finished Pcs:{" "}
                 <b style={{ color: "#1E3A5F" }}>
                   {item.calculation.finishedPieces}
                 </b>
@@ -364,21 +421,46 @@ function OrderImageCard({
                 Trees: <b>{item.calculation.waxTreesRequired}</b>
               </span>
               <span>
-                Wt/Pc: <b>{item.snapshot?.weightPerPiece}g</b>
-              </span>
-              <span>
-                Tree Sz: <b>{item.snapshot?.treeSize}</b>
-              </span>
-              <span>
-                Stones:{" "}
-                <b style={{ color: "#B8965A" }}>
-                  {formatNumber(item.calculation.totalStones)}
-                </b>
+                Tree Size: <b>{item.snapshot?.treeSize}</b>
               </span>
             </div>
           </div>
         ))}
       </div>
+
+      {/* Stone Details for Stone Karigars */}
+      {!isWaxKarigar && order.stoneUsage && order.stoneUsage.length > 0 && (
+        <div style={{ padding: "12px 20px", background: "#fff8dc", borderTop: "1px solid #e2e8f0" }}>
+          <div
+            style={{
+              fontSize: "11px",
+              fontWeight: 600,
+              color: "#64748b",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              marginBottom: 8,
+            }}
+          >
+            Stone Requirements
+          </div>
+          <div style={{ fontSize: "11px" }}>
+            {order.stoneUsage.map((usage, i) => (
+              <div
+                key={i}
+                style={{
+                  padding: "4px 0",
+                  borderBottom: i < order.stoneUsage!.length - 1 ? "1px solid #e2e8f0" : "none",
+                }}
+              >
+                <span style={{ color: "#64748b" }}>{usage.stoneType.toUpperCase()}: </span>
+                <strong style={{ color: "#1e293b" }}>{usage.stoneName}</strong>
+                <span style={{ color: "#64748b", marginLeft: 8 }}>Qty: </span>
+                <strong style={{ color: "#B8965A" }}>{usage.quantityUsed}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Summary */}
       <div
@@ -395,8 +477,13 @@ function OrderImageCard({
           Total Trees: <strong>{totalTrees}</strong>
         </span>
         <span>
-          Total Stones: <strong>{formatNumber(totalStones)}</strong>
+          Total Pieces: <strong>{totalPieces}</strong>
         </span>
+        {!isWaxKarigar && (
+          <span>
+            Total Stones: <strong>{formatNumber(totalStones)}</strong>
+          </span>
+        )}
       </div>
       <div
         style={{
@@ -423,6 +510,7 @@ export default function OrderDetailPage() {
   const [assignType, setAssignType] = useState<"wax" | "stone" | null>(null);
   const [statusNotes, setStatusNotes] = useState("");
   const [generatingImg, setGeneratingImg] = useState(false);
+  const [karigarType, setKarigarType] = useState<"wax" | "stone">("wax");
   const cardRef = useRef<HTMLDivElement>(null!);
   const appSettings = useMemo(() => getAppSettings(), []);
 
@@ -510,34 +598,70 @@ export default function OrderDetailPage() {
   };
 
   /* ── WhatsApp Image Share ─────────────────────────────────── */
-  const handleWhatsAppImageShare = async () => {
+  const handleWhatsAppImageShare = async (type?: "wax" | "stone") => {
     if (!cardRef.current) return;
+    
+    // Determine karigar type based on parameter or auto-detect
+    let targetType: "wax" | "stone" = "wax";
+    if (type) {
+      targetType = type;
+      setKarigarType(type);
+    } else {
+      // Auto-detect based on assignments
+      const hasWaxAssignment = order.karigarAssignments.some(a => a.type === "wax");
+      const hasStoneAssignment = order.karigarAssignments.some(a => a.type === "stone");
+      targetType = hasStoneAssignment ? "stone" : "wax";
+      setKarigarType(targetType);
+    }
+    
     setGeneratingImg(true);
     try {
+      toast.loading("Generating WhatsApp image...");
+      
       const canvas = await html2canvas(cardRef.current, {
         scale: 2,
         useCORS: true,
         backgroundColor: "#ffffff",
         logging: false,
       });
+      
       // Download JPG
       const link = document.createElement("a");
-      link.download = `${order.orderNumber}.jpg`;
+      link.download = `${order.orderNumber}_${targetType}_karigar.jpg`;
       link.href = canvas.toDataURL("image/jpeg", 0.95);
       link.click();
-      // Open WhatsApp Web
+      
+      // Get appropriate karigar phone number
+      const assignment = order.karigarAssignments.find(a => a.type === targetType);
+      const karigar = assignment 
+        ? getKarigars().find(k => k.id === assignment.karigarId)
+        : null;
+      const phone = karigar?.whatsapp || karigar?.mobile || order.customerWhatsapp?.replace(/\D/g, "") || "";
+      
+      // Open WhatsApp with kar number
       setTimeout(() => {
-        const phone = order.customerWhatsapp?.replace(/\D/g, "") || "";
         const url = phone
-          ? `https://wa.me/${phone}`
+          ? `https://wa.me/${phone.startsWith("91") ? phone : "91" + phone}`
           : "https://web.whatsapp.com";
         window.open(url, "_blank");
-        toast.success("Image downloaded! Attach it in WhatsApp.");
-      }, 400);
+        toast.success("Image downloaded! Attach it in WhatsApp chat.");
+      }, 500);
     } catch {
       toast.error("Image generation failed");
     } finally {
       setGeneratingImg(false);
+    }
+  };
+
+  const handleDelete = () => {
+    if (!confirm(`Are you sure you want to delete order ${order.orderNumber}? This cannot be undone.\n\nStones used in this order will be restored to inventory.`)) return;
+    try {
+      deleteOrder(order.id);
+      toast.success("Order deleted and stones restored to inventory");
+      navigate("/orders");
+    } catch (error) {
+      toast.error("Failed to delete order");
+      console.error(error);
     }
   };
 
@@ -557,11 +681,23 @@ export default function OrderDetailPage() {
               size="sm"
               variant="outline"
               className="h-7 text-xs"
-              onClick={handleWhatsAppImageShare}
+              onClick={() => handleWhatsAppImageShare("wax")}
               disabled={generatingImg}
             >
               <ImageDown size={12} className="mr-1" />
-              {generatingImg ? "Generating…" : "WhatsApp JPG"}
+              <MessageCircle size={12} className="mr-1" />
+              {generatingImg ? "Generating…" : "Wax"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={() => handleWhatsAppImageShare("stone")}
+              disabled={generatingImg}
+            >
+              <ImageDown size={12} className="mr-1" />
+              <MessageCircle size={12} className="mr-1" />
+              {generatingImg ? "Generating…" : "Stone"}
             </Button>
             <Button
               size="sm"
@@ -571,12 +707,20 @@ export default function OrderDetailPage() {
             >
               <Printer size={12} className="mr-1" /> Export
             </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-7 text-xs"
+              onClick={handleDelete}
+            >
+              <Trash2 size={12} className="mr-1" /> Delete
+            </Button>
           </div>
         }
       />
 
       {/* Hidden image card (rendered off-screen for html2canvas) */}
-      <OrderImageCard order={order} ref={cardRef} />
+      <OrderImageCard order={order} ref={cardRef} karigarType={karigarType} />
 
       {/* Main layout — 2-column */}
       <div className="erp-content">
@@ -867,6 +1011,7 @@ export default function OrderDetailPage() {
                   ["Date", formatDate(order.orderDate)],
                   ["Customer", order.customerName],
                   ["Mobile", order.customerMobile],
+                  ...(order.touch ? [["Touch", order.touch]] : []),
                   ["Items", String(order.items.length)],
                   [
                     "Total Trees",

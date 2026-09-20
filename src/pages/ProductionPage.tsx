@@ -1,8 +1,9 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ChevronRight, Hammer, Gem, Eye } from "lucide-react";
-import { getOrders, updateOrder, getKarigars } from "@/lib/db";
+import { ChevronRight, Hammer, Gem, Eye, Trash2, MessageCircle, Download } from "lucide-react";
+import html2canvas from "html2canvas";
+import { getOrders, updateOrder, deleteOrder, getKarigars } from "@/lib/db";
 import { formatDate } from "@/lib/utils";
 import { ORDER_STATUS_LABELS, getNextStatuses } from "@/lib/orderStatus";
 import { PageToolbar } from "@/components/layouts/AppLayout";
@@ -35,6 +36,129 @@ const ALL_PRODUCTION_STAGES: OrderStatus[] = [
   ...STONE_STAGES,
   "production_completed",
 ];
+
+// Generate WhatsApp JPG for wax karigar
+function generateWaxKarigarJPG(order: Order, karigar: any): string {
+  const totalWaxTrees = order.items.reduce((sum, item) => {
+    const calc = item.calculation;
+    return sum + (calc?.waxTreesRequired || 0);
+  }, 0);
+
+  return `
+    <div style="padding: 20px; font-family: Arial, sans-serif; max-width: 400px; background: white;">
+      <div style="border: 2px solid #d4af37; border-radius: 10px; padding: 15px;">
+        <h2 style="color: #d4af37; margin: 0 0 15px 0; text-align: center; font-size: 18px;">Wax Work Assignment</h2>
+        <div style="margin-bottom: 10px;">
+          <strong>Party/Customer:</strong> ${order.customerName}
+        </div>
+        <div style="margin-bottom: 10px;">
+          <strong>Order Number:</strong> ${order.orderNumber}
+        </div>
+        <div style="margin-bottom: 10px;">
+          <strong>Pattern Details:</strong>
+        </div>
+        ${order.items.map(item => `
+          <div style="margin-left: 15px; margin-bottom: 5px;">
+            • ${item.snapshot?.patternNumber || 'N/A'} - ${item.snapshot?.patternName || 'N/A'}
+          </div>
+        `).join('')}
+        <div style="margin-top: 15px; margin-bottom: 10px;">
+          <strong>Total Wax Trees Required:</strong> ${totalWaxTrees}
+        </div>
+        <div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 12px; color: #666;">
+          Generated on ${new Date().toLocaleDateString()}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// Generate WhatsApp JPG for stone karigar
+function generateStoneKarigarJPG(order: Order, karigar: any): string {
+  const stoneDetails = order.items.reduce((acc: any[], item) => {
+    const config = item.snapshot?.stoneConfig || [];
+    config.forEach((stone: any) => {
+      const existing = acc.find(s => s.size === stone.size && s.type === stone.type);
+      if (existing) {
+        existing.quantity += (item.calculation?.totalStones || 0) * (stone.quantityPerPiece || 1);
+      } else {
+        acc.push({
+          size: stone.size,
+          type: stone.type,
+          shape: stone.shape,
+          quantity: (item.calculation?.totalStones || 0) * (stone.quantityPerPiece || 1)
+        });
+      }
+    });
+    return acc;
+  }, []);
+
+  const totalWaxPieces = order.items.reduce((sum, item) => {
+    const calc = item.calculation;
+    return sum + (calc?.totalPieces || 0);
+  }, 0);
+
+  return `
+    <div style="padding: 20px; font-family: Arial, sans-serif; max-width: 400px; background: white;">
+      <div style="border: 2px solid #d4af37; border-radius: 10px; padding: 15px;">
+        <h2 style="color: #d4af37; margin: 0 0 15px 0; text-align: center; font-size: 18px;">Stone Setting Assignment</h2>
+        <div style="margin-bottom: 10px;">
+          <strong>Party/Customer:</strong> ${order.customerName}
+        </div>
+        <div style="margin-bottom: 10px;">
+          <strong>Order Number:</strong> ${order.orderNumber}
+        </div>
+        <div style="margin-bottom: 10px;">
+          <strong>Pattern Details:</strong>
+        </div>
+        ${order.items.map(item => `
+          <div style="margin-left: 15px; margin-bottom: 5px;">
+            • ${item.snapshot?.patternNumber || 'N/A'} - ${item.snapshot?.patternName || 'N/A'}
+          </div>
+        `).join('')}
+        <div style="margin-top: 15px; margin-bottom: 10px;">
+          <strong>Stone Requirements:</strong>
+        </div>
+        ${stoneDetails.map(stone => `
+          <div style="margin-left: 15px; margin-bottom: 5px;">
+            • ${stone.type === 'micro' ? 'Micro' : stone.shape} ${stone.size}: ${stone.quantity} pcs
+          </div>
+        `).join('')}
+        <div style="margin-top: 15px; margin-bottom: 10px;">
+          <strong>Total Wax Pieces Given:</strong> ${totalWaxPieces}
+        </div>
+        <div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 12px; color: #666;">
+          Generated on ${new Date().toLocaleDateString()}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function shareToWhatsApp(imageDataUrl: string, phoneNumber?: string) {
+  try {
+    // Convert data URL to blob
+    const response = await fetch(imageDataUrl);
+    const blob = await response.blob();
+    const file = new File([blob], 'assignment.jpg', { type: 'image/jpeg' });
+
+    // Copy to clipboard
+    if (navigator.clipboard && navigator.clipboard.write) {
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'image/jpeg': file })
+      ]);
+      toast.success("Image copied to clipboard! Paste in WhatsApp (Ctrl+V)");
+    }
+
+    // Open WhatsApp
+    const phone = phoneNumber || '';
+    const whatsappUrl = `https://wa.me/${phone}`;
+    window.open(whatsappUrl, '_blank');
+  } catch (error) {
+    console.error('Failed to share:', error);
+    toast.error("Failed to share. Please try screenshot method.");
+  }
+}
 
 function InlineAssignPanel({
   order,
@@ -183,6 +307,84 @@ function ProductionOrderRow({
   const isWaxStage = WAX_STAGES.includes(order.status);
   const isStoneStage = STONE_STAGES.includes(order.status);
 
+  const handleDelete = () => {
+    if (!confirm(`Are you sure you want to delete order ${order.orderNumber}? This cannot be undone.\n\nStones used in this order will be restored to inventory.`)) return;
+    try {
+      deleteOrder(order.id);
+      toast.success("Order deleted and stones restored to inventory");
+      onRefresh();
+    } catch (error) {
+      toast.error("Failed to delete order");
+      console.error(error);
+    }
+  };
+
+  const handleShareWax = async () => {
+    if (!waxAssign) return;
+    const htmlContent = generateWaxKarigarJPG(order, waxAssign);
+    
+    // Create a temporary div to render the HTML
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = htmlContent;
+    tempDiv.style.position = 'fixed';
+    tempDiv.style.left = '-9999px';
+    tempDiv.style.top = '0';
+    document.body.appendChild(tempDiv);
+
+    try {
+      const canvas = await html2canvas(tempDiv, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+      });
+      const imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      
+      // Get karigar phone number if available
+      const karigars = getKarigars();
+      const karigar = karigars.find(k => k.id === waxAssign.karigarId);
+      const phoneNumber = karigar?.mobile || '';
+      
+      await shareToWhatsApp(imageDataUrl, phoneNumber);
+    } catch (error) {
+      console.error('Failed to generate image:', error);
+      toast.error("Failed to generate image");
+    } finally {
+      document.body.removeChild(tempDiv);
+    }
+  };
+
+  const handleShareStone = async () => {
+    if (!stoneAssign) return;
+    const htmlContent = generateStoneKarigarJPG(order, stoneAssign);
+    
+    // Create a temporary div to render the HTML
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = htmlContent;
+    tempDiv.style.position = 'fixed';
+    tempDiv.style.left = '-9999px';
+    tempDiv.style.top = '0';
+    document.body.appendChild(tempDiv);
+
+    try {
+      const canvas = await html2canvas(tempDiv, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+      });
+      const imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      
+      // Get karigar phone number if available
+      const karigars = getKarigars();
+      const karigar = karigars.find(k => k.id === stoneAssign.karigarId);
+      const phoneNumber = karigar?.mobile || '';
+      
+      await shareToWhatsApp(imageDataUrl, phoneNumber);
+    } catch (error) {
+      console.error('Failed to generate image:', error);
+      toast.error("Failed to generate image");
+    } finally {
+      document.body.removeChild(tempDiv);
+    }
+  };
+
   return (
     <>
       <tr className="border-b border-border last:border-0 hover:bg-muted/20 transition-colors">
@@ -208,6 +410,15 @@ function ProductionOrderRow({
             <div className="flex items-center gap-1">
               <Hammer size={10} className="text-orange-500 shrink-0" />
               <span>{waxAssign.karigarName}</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-5 w-5 p-0 ml-1 text-green-600 hover:text-green-700"
+                onClick={handleShareWax}
+                title="Share via WhatsApp"
+              >
+                <MessageCircle size={10} />
+              </Button>
             </div>
           ) : isWaxStage ? (
             <Button
@@ -227,6 +438,15 @@ function ProductionOrderRow({
             <div className="flex items-center gap-1">
               <Gem size={10} className="text-pink-500 shrink-0" />
               <span>{stoneAssign.karigarName}</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-5 w-5 p-0 ml-1 text-green-600 hover:text-green-700"
+                onClick={handleShareStone}
+                title="Share via WhatsApp"
+              >
+                <MessageCircle size={10} />
+              </Button>
             </div>
           ) : isStoneStage ? (
             <Button
@@ -253,6 +473,14 @@ function ProductionOrderRow({
               onClick={() => navigate(`/orders/${order.id}`)}
             >
               <Eye size={11} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="w-6 h-6 text-destructive hover:text-destructive"
+              onClick={handleDelete}
+            >
+              <Trash2 size={11} />
             </Button>
           </div>
         </td>

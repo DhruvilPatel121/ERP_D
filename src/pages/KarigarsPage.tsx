@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { useForm, type SubmitHandler, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -111,6 +112,9 @@ function KarigarWhatsAppCard({
   const assignedOrders = orders.filter((o) =>
     o.karigarAssignments?.some((a) => a.karigarId === karigar.id),
   );
+
+  const isWaxKarigar = karigar.type === "wax";
+
   return (
     <div
       style={{
@@ -156,33 +160,60 @@ function KarigarWhatsAppCard({
         </div>
       ) : (
         <table
-          style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}
+          style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}
         >
           <thead>
             <tr style={{ background: "#f3f4f6" }}>
-              {["Order #", "Date", "Patterns", "Fin. Pcs", "Status"].map(
-                (h) => (
-                  <th
-                    key={h}
-                    style={{
-                      padding: "6px 8px",
-                      textAlign: "left",
-                      color: "#374151",
-                      fontWeight: 600,
-                    }}
-                  >
-                    {h}
-                  </th>
-                ),
+              {isWaxKarigar ? (
+                <>
+                  <th style={{ padding: "6px 8px", textAlign: "left", color: "#374151", fontWeight: 600 }}>Party/Customer</th>
+                  <th style={{ padding: "6px 8px", textAlign: "left", color: "#374151", fontWeight: 600 }}>Order #</th>
+                  <th style={{ padding: "6px 8px", textAlign: "left", color: "#374151", fontWeight: 600 }}>Pattern #</th>
+                  <th style={{ padding: "6px 8px", textAlign: "right", color: "#374151", fontWeight: 600 }}>Total Pcs</th>
+                  <th style={{ padding: "6px 8px", textAlign: "right", color: "#374151", fontWeight: 600 }}>Total Tree</th>
+                </>
+              ) : (
+                <>
+                  <th style={{ padding: "6px 8px", textAlign: "left", color: "#374151", fontWeight: 600 }}>Party/Customer</th>
+                  <th style={{ padding: "6px 8px", textAlign: "left", color: "#374151", fontWeight: 600 }}>Order #</th>
+                  <th style={{ padding: "6px 8px", textAlign: "left", color: "#374151", fontWeight: 600 }}>Pattern #</th>
+                  <th style={{ padding: "6px 8px", textAlign: "right", color: "#374151", fontWeight: 600 }}>Total Pcs</th>
+                  <th style={{ padding: "6px 8px", textAlign: "right", color: "#374151", fontWeight: 600 }}>Total Tree</th>
+                  <th style={{ padding: "6px 8px", textAlign: "left", color: "#374151", fontWeight: 600 }}>Stone Details</th>
+                </>
               )}
             </tr>
           </thead>
           <tbody>
             {assignedOrders.map((o, i) => {
-              const pcs = o.items.reduce(
+              const totalPcs = o.items.reduce(
                 (s, it) => s + it.calculation.finishedPieces,
                 0,
               );
+              const totalTrees = o.items.reduce(
+                (s, it) => s + it.calculation.waxTreesRequired,
+                0,
+              );
+              const patternNumbers = o.items
+                .map((i) => i.snapshot?.patternNumber || "—")
+                .join(", ");
+              
+              // For stone karigars, gather stone details
+              let stoneDetails = "";
+              if (!isWaxKarigar && o.stoneUsage && o.stoneUsage.length > 0) {
+                const microStones = o.stoneUsage.filter(s => s.stoneType === 'micro');
+                const adStones = o.stoneUsage.filter(s => s.stoneType === 'ad');
+                
+                const microDetails = microStones.map(s => `${s.stoneName}: ${s.quantityUsed}`).join(", ");
+                const adDetails = adStones.map(s => `${s.stoneName}: ${s.quantityUsed}`).join(", ");
+                
+                const totalStones = o.stoneUsage.reduce((sum, s) => sum + s.quantityUsed, 0);
+                
+                stoneDetails = `Total: ${totalStones}`;
+                if (microDetails) stoneDetails += ` | Micro: ${microDetails}`;
+                if (adDetails) stoneDetails += ` | AD: ${adDetails}`;
+              }
+
               return (
                 <tr
                   key={o.id}
@@ -191,37 +222,14 @@ function KarigarWhatsAppCard({
                     borderBottom: "1px solid #e5e7eb",
                   }}
                 >
-                  <td
-                    style={{
-                      padding: "6px 8px",
-                      fontWeight: 600,
-                      color: "#2563eb",
-                    }}
-                  >
-                    {o.orderNumber}
-                  </td>
-                  <td style={{ padding: "6px 8px", color: "#6b7280" }}>
-                    {o.orderDate.slice(0, 10)}
-                  </td>
-                  <td style={{ padding: "6px 8px" }}>
-                    {o.items
-                      .map((i) => i.snapshot?.patternNumber || "—")
-                      .join(", ")}
-                  </td>
-                  <td style={{ padding: "6px 8px", fontWeight: 600 }}>{pcs}</td>
-                  <td style={{ padding: "6px 8px" }}>
-                    <span
-                      style={{
-                        background: "#dcfce7",
-                        color: "#16a34a",
-                        borderRadius: 4,
-                        padding: "2px 6px",
-                        fontSize: 11,
-                      }}
-                    >
-                      {o.status.replace(/_/g, " ")}
-                    </span>
-                  </td>
+                  <td style={{ padding: "6px 8px", fontWeight: 600 }}>{o.customerName}</td>
+                  <td style={{ padding: "6px 8px", fontWeight: 600, color: "#2563eb" }}>{o.orderNumber}</td>
+                  <td style={{ padding: "6px 8px" }}>{patternNumbers}</td>
+                  <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 600 }}>{totalPcs}</td>
+                  <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 600 }}>{totalTrees}</td>
+                  {!isWaxKarigar && (
+                    <td style={{ padding: "6px 8px", fontSize: 10, color: "#6b7280" }}>{stoneDetails}</td>
+                  )}
                 </tr>
               );
             })}
@@ -522,6 +530,7 @@ function DiceRangePanel({
     }
     const karigar = karigars.find((k) => k.id === form.karigarId);
     if (!karigar) return;
+
     const payload = {
       karigarId: form.karigarId,
       karigarName: karigar.name,
@@ -529,16 +538,21 @@ function DiceRangePanel({
       toNumber: to,
       notes: form.notes,
     };
-    if (editId) {
-      updatePatternDiceRange(editId, payload);
-      toast.success("Range updated");
-    } else {
-      addPatternDiceRange(payload);
-      toast.success("Range added");
+
+    try {
+      if (editId) {
+        updatePatternDiceRange(editId, payload);
+        toast.success("Range updated");
+      } else {
+        addPatternDiceRange(payload);
+        toast.success("Range added");
+      }
+      setForm({ karigarId: "", fromNumber: "", toNumber: "", notes: "" });
+      setEditId(null);
+      refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save range");
     }
-    setForm({ karigarId: "", fromNumber: "", toNumber: "", notes: "" });
-    setEditId(null);
-    refresh();
   };
 
   const handleEdit = (r: PatternDiceRange) => {
@@ -803,11 +817,14 @@ function KarigarDetailPage({
   karigar,
   onEdit,
   onBack,
+  onDelete,
 }: {
   karigar: Karigar;
   onEdit: () => void;
   onBack: () => void;
+  onDelete: () => void;
 }) {
+  const navigate = useNavigate();
   const cardRef = useRef<HTMLDivElement>(null);
   const allOrders = useMemo(() => getOrders(), []);
 
@@ -872,31 +889,37 @@ function KarigarDetailPage({
   const handleShareWhatsApp = async () => {
     if (!cardRef.current) return;
     try {
+      toast.loading("Generating WhatsApp image...");
+      
       const canvas = await html2canvas(cardRef.current, {
         scale: 2,
         useCORS: true,
         backgroundColor: "#ffffff",
       });
+      
       const blob = await new Promise<Blob>((res) =>
-        canvas.toBlob((b) => res(b!), "image/jpeg", 0.92),
+        canvas.toBlob((b) => res(b!), "image/jpeg", 0.95),
       );
+      
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${karigar.name.replace(/\s+/g, "_")}_work.jpg`;
+      a.download = `${karigar.name.replace(/\s+/g, "_")}_orders_${new Date().toISOString().slice(0,10)}.jpg`;
       a.click();
       URL.revokeObjectURL(url);
+      
       const wa = karigar.whatsapp || karigar.mobile;
       const num = wa.replace(/\D/g, "");
-      setTimeout(
-        () =>
-          window.open(
-            `https://wa.me/${num.startsWith("91") ? num : "91" + num}`,
-            "_blank",
-          ),
-        400,
-      );
-      toast.success("JPG downloaded — attach it in WhatsApp");
+      
+      // Open WhatsApp with the correct number
+      setTimeout(() => {
+        window.open(
+          `https://wa.me/${num.startsWith("91") ? num : "91" + num}`,
+          "_blank",
+        );
+      }, 500);
+      
+      toast.success("Image downloaded! Attach it in WhatsApp chat.");
     } catch (e) {
       toast.error("Failed to generate image");
       console.error(e);
@@ -941,6 +964,10 @@ function KarigarDetailPage({
         <Button size="sm" className="h-7 text-xs ml-1" onClick={onEdit}>
           <Pencil size={12} className="mr-1" />
           Edit
+        </Button>
+        <Button size="sm" variant="destructive" className="h-7 text-xs ml-1" onClick={onDelete}>
+          <Trash2 size={12} className="mr-1" />
+          Delete
         </Button>
       </div>
 
@@ -1185,8 +1212,12 @@ function KarigarDetailPage({
                         0,
                       );
                       return (
-                        <tr key={o.id}>
-                          <td className="font-medium text-primary text-xs">
+                        <tr 
+                          key={o.id} 
+                          className="cursor-pointer hover:bg-muted/20"
+                          onClick={() => navigate(`/orders/${o.id}`)}
+                        >
+                          <td className="font-medium text-primary text-xs hover:underline">
                             {o.orderNumber}
                           </td>
                           <td className="text-xs">{o.customerName}</td>
@@ -1597,6 +1628,14 @@ export default function KarigarsPage() {
         karigar={fresh}
         onEdit={() => setView("edit")}
         onBack={backToList}
+        onDelete={() => {
+          if (confirm(`Are you sure you want to delete ${fresh.name}? This cannot be undone.`)) {
+            deleteKarigar(fresh.id);
+            toast.success("Karigar deleted");
+            refresh();
+            backToList();
+          }
+        }}
       />
     );
   }

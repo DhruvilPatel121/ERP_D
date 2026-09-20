@@ -11,7 +11,9 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
 } from "lucide-react";
+import { getMicroDiamonds, getADDiamonds } from "@/lib/db";
 import {
   AreaChart,
   Area,
@@ -92,6 +94,32 @@ export default function DashboardPage() {
     [orders],
   );
 
+  // Check for low inventory - compute on each render to react to localStorage changes
+  const lowInventoryItems = (() => {
+    const lowItems: { type: string; name: string; available: number; total: number }[] = [];
+    const LOW_STOCK_THRESHOLD = 100;
+    const microDiamonds = getMicroDiamonds();
+    const adDiamonds = getADDiamonds();
+
+    microDiamonds.forEach((m) => {
+      const qty = m.quantity || 0;
+      const total = m.totalQuantity || qty;
+      if (m.isActive !== false && qty <= LOW_STOCK_THRESHOLD) {
+        lowItems.push({ type: "Micro", name: `${m.size}mm`, available: qty, total });
+      }
+    });
+
+    adDiamonds.forEach((a) => {
+      const qty = a.quantity || 0;
+      const total = a.totalQuantity || qty;
+      if (a.isActive !== false && qty <= LOW_STOCK_THRESHOLD) {
+        lowItems.push({ type: "AD", name: `${a.shape} ${a.size}`, available: qty, total });
+      }
+    });
+
+    return lowItems.sort((a, b) => a.available - b.available);
+  })();
+
   return (
     <div className="flex flex-col min-h-0">
       <PageHeader
@@ -100,6 +128,33 @@ export default function DashboardPage() {
       />
 
       <div className="p-6 flex flex-col gap-6">
+        {/* Low Inventory Alert */}
+        {lowInventoryItems.length > 0 && (
+          <div className="card-l1 p-4 bg-destructive/10 border-destructive/30">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="text-destructive" size={16} />
+              <span className="text-sm font-semibold text-destructive">
+                Low Inventory Alert ({lowInventoryItems.length} items)
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {lowInventoryItems.slice(0, 5).map((item, idx) => (
+                <div
+                  key={idx}
+                  className="text-xs bg-background px-2 py-1 rounded border border-border"
+                >
+                  {item.type} {item.name}: <span className="font-semibold text-destructive">{item.available}/{item.total}</span>
+                </div>
+              ))}
+              {lowInventoryItems.length > 5 && (
+                <span className="text-xs text-muted-foreground">
+                  +{lowInventoryItems.length - 5} more
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* KPI Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <KPICard
@@ -109,6 +164,8 @@ export default function DashboardPage() {
             icon={Users}
             iconBg="bg-blue-50"
             iconColor="text-blue-600"
+            onClick={() => navigate("/customers")}
+            clickable
           />
           <KPICard
             title="Patterns / Items"
@@ -117,6 +174,8 @@ export default function DashboardPage() {
             icon={Package}
             iconBg="bg-purple-50"
             iconColor="text-purple-600"
+            onClick={() => navigate("/patterns")}
+            clickable
           />
           <KPICard
             title="Active Orders"
@@ -125,6 +184,8 @@ export default function DashboardPage() {
             icon={ShoppingCart}
             iconBg="bg-amber-50"
             iconColor="text-amber-600"
+            onClick={() => navigate("/orders")}
+            clickable
           />
           <KPICard
             title="In Production"
@@ -133,6 +194,8 @@ export default function DashboardPage() {
             icon={Factory}
             iconBg="bg-green-50"
             iconColor="text-green-600"
+            onClick={() => navigate("/production")}
+            clickable
           />
         </div>
 
@@ -144,6 +207,8 @@ export default function DashboardPage() {
             icon={Gem}
             iconBg="bg-pink-50"
             iconColor="text-pink-600"
+            onClick={() => navigate("/stones")}
+            clickable
           />
           <KPICard
             title="Wax Pending"
@@ -152,6 +217,8 @@ export default function DashboardPage() {
             icon={Hammer}
             iconBg="bg-orange-50"
             iconColor="text-orange-600"
+            onClick={() => navigate("/production")}
+            clickable
           />
           <KPICard
             title="Stone Setting"
@@ -160,6 +227,8 @@ export default function DashboardPage() {
             icon={TrendingUp}
             iconBg="bg-teal-50"
             iconColor="text-teal-600"
+            onClick={() => navigate("/production")}
+            clickable
           />
           <KPICard
             title="Completed"
@@ -168,6 +237,8 @@ export default function DashboardPage() {
             icon={CheckCircle2}
             iconBg="bg-emerald-50"
             iconColor="text-emerald-600"
+            onClick={() => navigate("/orders")}
+            clickable
           />
         </div>
 
@@ -346,7 +417,7 @@ export default function DashboardPage() {
           </div>
 
           <SectionCard title="Recent Activity">
-            <div className="divide-y divide-border">
+            <div className="divide-y divide-border max-h-80 overflow-y-auto">
               {stats.recentActivity.length === 0 ? (
                 <p className="px-4 py-6 text-sm text-muted-foreground text-center">
                   No activity yet

@@ -618,11 +618,13 @@ function CustomerDetailPage({
   onEdit,
   onBack,
   onViewOrder,
+  onDelete,
 }: {
   customer: Customer;
   onEdit: () => void;
   onBack: () => void;
   onViewOrder: (order: Order) => void;
+  onDelete: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -700,6 +702,10 @@ function CustomerDetailPage({
         <Button size="sm" className="h-7 text-xs ml-2" onClick={onEdit}>
           <Pencil size={12} className="mr-1" />
           Edit
+        </Button>
+        <Button size="sm" variant="destructive" className="h-7 text-xs ml-2" onClick={onDelete}>
+          <Trash2 size={12} className="mr-1" />
+          Delete
         </Button>
       </div>
       <div className="page-panel-body">
@@ -1022,6 +1028,9 @@ export default function CustomersPage() {
           setSelectedOrder(o);
           setView("order-detail");
         }}
+        onDelete={() => {
+          setDeleteTarget(fresh);
+        }}
       />
     );
   }
@@ -1080,106 +1089,50 @@ export default function CustomersPage() {
       </div>
 
       <div className="erp-content">
-        <div className="overflow-x-auto">
-          <table className="erp-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Party Name</th>
-                <th>Contact</th>
-                <th>Mobile</th>
-                <th>City</th>
-                <th>Status</th>
-                <th>Added</th>
-                <th className="text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={8}
-                    className="py-16 text-center text-sm text-muted-foreground"
-                  >
-                    {search
-                      ? "No customers match."
-                      : 'No customers yet. Click "New Customer" to add one.'}
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((c) => (
-                  <tr
-                    key={c.id}
-                    className="cursor-pointer"
-                    onClick={() => {
-                      setSelected(c);
-                      setView("detail");
-                    }}
-                  >
-                    <td className="text-xs text-muted-foreground font-mono">
-                      {c.customerId}
-                    </td>
-                    <td>
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-6 h-6 rounded bg-primary/10 flex items-center justify-center shrink-0">
-                          <Building2 size={11} className="text-primary" />
-                        </div>
-                        <span className="font-semibold text-xs text-primary hover:underline">
-                          {c.partyName}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="text-xs text-muted-foreground">
-                      {c.contactPerson || "—"}
-                    </td>
-                    <td>
-                      <div className="flex items-center gap-1 text-xs">
-                        <Phone size={10} className="text-muted-foreground" />
-                        {c.mobile}
-                      </div>
-                    </td>
-                    <td className="text-xs text-muted-foreground">
-                      {c.city || "—"}
-                    </td>
-                    <td>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 p-4">
+          {filtered.length === 0 ? (
+            <div className="col-span-full py-16 text-center text-sm text-muted-foreground">
+              {search
+                ? "No customers match."
+                : 'No customers yet. Click "New Customer" to add one.'}
+            </div>
+          ) : (
+            filtered.map((c) => (
+              <div
+                key={c.id}
+                className="card-l1 p-4 cursor-pointer hover:border-primary/50 transition-colors"
+                onClick={() => {
+                  setSelected(c);
+                  setView("detail");
+                }}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                    <Building2 size={18} className="text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm text-primary hover:underline truncate">
+                      {c.partyName}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {c.mobile}
+                    </div>
+                    <div className="flex items-center gap-2 mt-2">
                       <Badge
                         variant={c.isActive ? "default" : "secondary"}
                         className="text-[10px] h-4 px-1.5"
                       >
                         {c.isActive ? "Active" : "Inactive"}
                       </Badge>
-                    </td>
-                    <td className="text-xs text-muted-foreground">
-                      {formatDate(c.createdAt)}
-                    </td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <div className="flex gap-0.5 justify-end">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="w-6 h-6"
-                          onClick={() => {
-                            setSelected(c);
-                            setView("edit");
-                          }}
-                        >
-                          <Pencil size={11} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="w-6 h-6 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(c)}
-                        >
-                          <Trash2 size={11} />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                      <span className="text-[10px] text-muted-foreground">
+                        {formatDate(c.createdAt)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
         </div>
         {deleteTarget && (
           <div className="sticky bottom-0 p-3 bg-card border-t border-border">

@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useForm, type SubmitHandler, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -14,18 +15,24 @@ import {
   Diamond,
   Gem,
   ArrowLeft,
+  FileText,
 } from "lucide-react";
 import {
   getMicroDiamonds,
+  saveMicroDiamonds,
   addMicroDiamond,
   updateMicroDiamond,
   deleteMicroDiamond,
   getADDiamonds,
+  saveADDiamonds,
   addADDiamond,
   updateADDiamond,
   deleteADDiamond,
-  getStoneCategories,
-  addStoneCategory,
+  getADShapes,
+  saveADShapes,
+  getOrders,
+  addADShape,
+  deleteADShape,
 } from "@/lib/db";
 import { PageToolbar } from "@/components/layouts/AppLayout";
 import { SearchInput } from "@/components/common/SearchInput";
@@ -53,40 +60,37 @@ import { Separator } from "@/components/ui/separator";
 import type { MicroDiamond, ADDiamond, StoneCategory } from "@/types/erp";
 
 const microSchema = z.object({
-  stoneName: z.string().min(1, "Name required"),
-  categoryId: z.string().min(1, "Category required"),
   size: z.string().min(1, "Size required"),
-  shape: z.string().min(1, "Shape required"),
-  gradeType: z.string().default(""),
-  colour: z.string().default(""),
-  stonesPerGram: z.preprocess(
-    (v) => (v === "" ? null : Number(v)),
-    z.number().nullable(),
+  quantity: z.preprocess(
+    (v) => (v === "" ? 0 : Number(v)),
+    z.number().min(0, "Quantity must be positive"),
   ),
-  supplier: z.string().default(""),
-  notes: z.string().default(""),
+  weight: z.preprocess(
+    (v) => (v === "" ? 0 : Number(v)),
+    z.number().min(0, "Weight must be positive"),
+  ),
+  pricePer1000: z.preprocess(
+    (v) => (v === "" ? 0 : Number(v)),
+    z.number().min(0, "Price must be positive"),
+  ),
   isActive: z.boolean().default(true),
 });
 
 const adSchema = z.object({
-  stoneName: z.string().min(1, "Name required"),
-  categoryId: z.string().min(1, "Category required"),
-  shape: z.string().min(1, "Shape required"),
+  shapeId: z.string().min(1, "Shape required"),
   size: z.string().min(1, "Size required"),
-  length: z.preprocess(
-    (v) => (v === "" ? null : Number(v)),
-    z.number().nullable(),
-  ),
-  width: z.preprocess(
-    (v) => (v === "" ? null : Number(v)),
-    z.number().nullable(),
+  quantity: z.preprocess(
+    (v) => (v === "" ? 0 : Number(v)),
+    z.number().min(0, "Quantity must be positive"),
   ),
   weight: z.preprocess(
-    (v) => (v === "" ? null : Number(v)),
-    z.number().nullable(),
+    (v) => (v === "" ? 0 : Number(v)),
+    z.number().min(0, "Weight must be positive"),
   ),
-  supplier: z.string().default(""),
-  notes: z.string().default(""),
+  pricePerPiece: z.preprocess(
+    (v) => (v === "" ? 0 : Number(v)),
+    z.number().min(0, "Price must be positive"),
+  ),
   isActive: z.boolean().default(true),
 });
 
@@ -114,7 +118,8 @@ type ViewMode =
   | "micro-detail"
   | "micro-add"
   | "micro-edit"
-  | "ad-list"
+  | "ad-shapes"
+  | "ad-sizes"
   | "ad-detail"
   | "ad-add"
   | "ad-edit";
@@ -199,39 +204,53 @@ function MicroDiamondFormPage({
   onSave,
   onCancel,
 }: {
-  stone?: MicroDiamond;
+  stone?: any;
   onSave: () => void;
   onCancel: () => void;
 }) {
+  const [restockAmount, setRestockAmount] = useState(0);
+
   const form = useForm<MicroFormValues>({
     resolver: zodResolver(microSchema) as Resolver<MicroFormValues>,
     defaultValues: stone
       ? {
-          stoneName: stone.stoneName,
-          categoryId: stone.categoryId,
           size: stone.size,
-          shape: stone.shape,
-          gradeType: stone.gradeType ?? "",
-          colour: stone.colour ?? "",
-          stonesPerGram: stone.stonesPerGram,
-          supplier: stone.supplier ?? "",
-          notes: stone.notes ?? "",
-          isActive: stone.isActive,
+          quantity: stone.quantity || 0,
+          weight: stone.weight || 0,
+          pricePer1000: stone.price_per_1000 || 0,
+          isActive: stone.isActive !== false,
         }
-      : { isActive: true, gradeType: "", colour: "", supplier: "", notes: "" },
+      : { isActive: true, quantity: 0, weight: 0, pricePer1000: 0 },
   });
 
-  const onSubmit: SubmitHandler<MicroFormValues> = (v) => {
+  const onSubmit: SubmitHandler<MicroFormValues> = async (v) => {
     try {
+      // Ensure all numeric values are properly converted
+      const quantity = Number(v.quantity) || 0;
+      const weight = Number(v.weight) || 0;
+      const pricePer1000 = Number(v.pricePer1000) || 0;
+      const restock = Number(restockAmount) || 0;
+
       if (stone) {
+        // If restocking, add to both quantity and totalQuantity
+        const finalQuantity = restock > 0 ? quantity + restock : quantity;
         updateMicroDiamond(stone.id, {
-          ...v,
-          weightUnit: "gram",
-          individualWeight: null,
+          size: v.size,
+          quantity: finalQuantity,
+          totalQuantity: restock > 0 ? (stone.totalQuantity || quantity) + restock : undefined,
+          weight,
+          price_per_1000: pricePer1000,
+          isActive: v.isActive,
         });
-        toast.success("Micro diamond updated");
+        toast.success(restock > 0 ? `Micro diamond restocked (+${restock})` : "Micro diamond updated");
       } else {
-        addMicroDiamond({ ...v, weightUnit: "gram", individualWeight: null });
+        addMicroDiamond({
+          size: v.size,
+          quantity,
+          weight,
+          price_per_1000: pricePer1000,
+          isActive: v.isActive,
+        });
         toast.success("Micro diamond added");
       }
       onSave();
@@ -261,7 +280,7 @@ function MicroDiamondFormPage({
         <span className="text-[11px] text-muted-foreground">Micro Diamond</span>
         <ChevronRight size={10} className="text-muted-foreground/40" />
         <span className="text-[11px] font-medium">
-          {stone ? `Edit: ${stone.stoneName}` : "New Micro Diamond"}
+          {stone ? `Edit: ${stone.size}` : "New Micro Diamond"}
         </span>
         <div className="flex-1" />
         <Button
@@ -292,40 +311,6 @@ function MicroDiamondFormPage({
                 </span>
               </div>
               <div className="px-4 py-1">
-                <FieldRow label="Stone Name *">
-                  <FormField
-                    control={form.control}
-                    name="stoneName"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormControl>
-                          <Input
-                            {...field}
-                            className="h-8 text-sm"
-                            placeholder="e.g. Round Micro 1.3mm"
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </FieldRow>
-                <FieldRow label="Category *">
-                  <FormField
-                    control={form.control}
-                    name="categoryId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <CategorySelector
-                          type="micro"
-                          value={field.value ?? ""}
-                          onChange={field.onChange}
-                        />
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </FieldRow>
                 <FieldRow label="Size *">
                   <FormField
                     control={form.control}
@@ -344,78 +329,72 @@ function MicroDiamondFormPage({
                     )}
                   />
                 </FieldRow>
-                <FieldRow label="Shape *">
+                <FieldRow label="Quantity *">
                   <FormField
                     control={form.control}
-                    name="shape"
-                    render={({ field }) => (
-                      <FormItem>
-                        <Select
-                          value={field.value}
-                          onValueChange={field.onChange}
-                        >
-                          <SelectTrigger className="h-8 text-sm">
-                            <SelectValue placeholder="Shape" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {SHAPES.map((s) => (
-                              <SelectItem key={s} value={s}>
-                                {s}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </FieldRow>
-                <FieldRow label="Grade">
-                  <FormField
-                    control={form.control}
-                    name="gradeType"
-                    render={({ field }) => (
-                      <FormItem>
-                        <Select
-                          value={field.value}
-                          onValueChange={field.onChange}
-                        >
-                          <SelectTrigger className="h-8 text-sm">
-                            <SelectValue placeholder="Grade (optional)" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {GRADES.map((g) => (
-                              <SelectItem key={g} value={g}>
-                                {g}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </FormItem>
-                    )}
-                  />
-                </FieldRow>
-                <FieldRow label="Colour">
-                  <FormField
-                    control={form.control}
-                    name="colour"
+                    name="quantity"
                     render={({ field }) => (
                       <FormItem>
                         <FormControl>
                           <Input
                             {...field}
+                            type="number"
+                            step="1"
                             className="h-8 text-sm"
-                            placeholder="e.g. White"
+                            placeholder="Number of stones"
                           />
                         </FormControl>
+                        <FormMessage />
                       </FormItem>
                     )}
                   />
                 </FieldRow>
-                <FieldRow label="Stones / Gram">
+                {stone && (
+                  <FieldRow label="Restock (Add Stock)">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        step="1"
+                        min="0"
+                        value={restockAmount || ""}
+                        onChange={(e) => setRestockAmount(Number(e.target.value))}
+                        className="h-8 text-sm w-32"
+                        placeholder="0"
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {restockAmount > 0 && (
+                          <span className="text-accent font-medium">
+                            New total: {(stone.quantity || 0) + Number(restockAmount)} / {(stone.totalQuantity || stone.quantity || 0) + Number(restockAmount)}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  </FieldRow>
+                )}
+                <FieldRow label="Weight (grams) *">
                   <FormField
                     control={form.control}
-                    name="stonesPerGram"
+                    name="weight"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type="number"
+                            step="0.001"
+                            className="h-8 text-sm"
+                            placeholder="Total weight in grams"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </FieldRow>
+                <FieldRow label="Price per 1000">
+                  <FormField
+                    control={form.control}
+                    name="pricePer1000"
                     render={({ field }) => (
                       <FormItem>
                         <FormControl>
@@ -424,23 +403,8 @@ function MicroDiamondFormPage({
                             type="number"
                             step="0.01"
                             className="h-8 text-sm"
-                            placeholder="Optional"
-                            value={field.value ?? ""}
-                            onChange={(e) => field.onChange(e.target.value)}
+                            placeholder="Price per 1000 stones"
                           />
-                        </FormControl>
-                      </FormItem>
-                    )}
-                  />
-                </FieldRow>
-                <FieldRow label="Supplier">
-                  <FormField
-                    control={form.control}
-                    name="supplier"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormControl>
-                          <Input {...field} className="h-8 text-sm" />
                         </FormControl>
                       </FormItem>
                     )}
@@ -480,11 +444,52 @@ function MicroDetailPage({
   stone,
   onEdit,
   onBack,
+  onDelete,
 }: {
-  stone: MicroDiamond;
+  stone: any;
   onEdit: () => void;
   onBack: () => void;
+  onDelete: () => void;
 }) {
+  const navigate = useNavigate();
+  const orders = getOrders();
+  
+  // Calculate actual usage from orders
+  const totalUsed = useMemo(() => {
+    let used = 0;
+    orders.forEach(order => {
+      if (order.stoneUsage) {
+        order.stoneUsage.forEach((usage: any) => {
+          if (usage.stoneType === 'micro' && usage.stoneId === stone.id) {
+            used += usage.quantityUsed;
+          }
+        });
+      }
+    });
+    return used;
+  }, [orders, stone.id]);
+  
+  // Get order-wise usage details
+  const orderUsageDetails = useMemo(() => {
+    const details: any[] = [];
+    orders.forEach(order => {
+      if (order.stoneUsage) {
+        order.stoneUsage.forEach((usage: any) => {
+          if (usage.stoneType === 'micro' && usage.stoneId === stone.id) {
+            details.push({
+              orderNumber: order.orderNumber,
+              orderDate: order.orderDate,
+              customerName: order.customerName,
+              quantityUsed: usage.quantityUsed,
+              orderId: order.id,
+            });
+          }
+        });
+      }
+    });
+    return details.sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime());
+  }, [orders, stone.id]);
+
   return (
     <div className="page-panel">
       <div className="page-panel-header">
@@ -504,42 +509,103 @@ function MicroDetailPage({
         <ChevronRight size={10} className="text-muted-foreground/40" />
         <span className="text-[11px] text-muted-foreground">Micro Diamond</span>
         <ChevronRight size={10} className="text-muted-foreground/40" />
-        <span className="text-[11px] font-medium">{stone.stoneName}</span>
+        <span className="text-[11px] font-medium">{stone.size}</span>
         <div className="flex-1" />
-        <Button size="sm" className="h-7 text-xs" onClick={onEdit}>
+        <Badge
+          variant={stone.isActive ? "default" : "secondary"}
+          className="text-[10px] h-4 px-1.5"
+        >
+          {stone.isActive ? "Active" : "Inactive"}
+        </Badge>
+        <Button size="sm" className="h-7 text-xs ml-2" onClick={onEdit}>
           <Pencil size={12} className="mr-1" />
           Edit
         </Button>
+        <Button size="sm" variant="destructive" className="h-7 text-xs ml-2" onClick={onDelete}>
+          <Trash2 size={12} className="mr-1" />
+          Delete
+        </Button>
       </div>
       <div className="page-panel-body">
-        <div className="max-w-xl mx-auto">
+        <div className="max-w-3xl mx-auto flex flex-col gap-4">
+          {/* Inventory Stats */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="card-l1 p-4 flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">Remaining / Total</span>
+              <span className="text-xl font-bold text-primary">{stone.quantity || 0} / {stone.totalQuantity || 0}</span>
+              <span className="text-[10px] text-muted-foreground">stones</span>
+            </div>
+            <div className="card-l1 p-4 flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">Used in Orders</span>
+              <span className="text-xl font-bold text-destructive cursor-pointer hover:underline" onClick={() => {}}>
+                {totalUsed}
+              </span>
+              <span className="text-[10px] text-muted-foreground">stones</span>
+            </div>
+            <div className="card-l1 p-4 flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">Total Weight</span>
+              <span className="text-xl font-bold">{stone.weight || 0}g</span>
+              <span className="text-[10px] text-muted-foreground">grams</span>
+            </div>
+          </div>
+
+          {/* Order Usage Details */}
+          {orderUsageDetails.length > 0 && (
+            <div className="card-l1">
+              <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center gap-2">
+                <FileText size={13} className="text-accent" />
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Order Usage Details
+                </span>
+              </div>
+              <div className="px-4 py-2">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left py-2 text-muted-foreground">Order #</th>
+                      <th className="text-left py-2 text-muted-foreground">Customer</th>
+                      <th className="text-left py-2 text-muted-foreground">Date</th>
+                      <th className="text-right py-2 text-muted-foreground">Used</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orderUsageDetails.map((detail, idx) => (
+                      <tr 
+                        key={idx} 
+                        className="border-b border-border/50 hover:bg-muted/30 cursor-pointer"
+                        onClick={() => navigate(`/orders/${detail.orderId}`)}
+                      >
+                        <td className="py-2 font-medium text-primary hover:underline">{detail.orderNumber}</td>
+                        <td className="py-2">{detail.customerName}</td>
+                        <td className="py-2 text-muted-foreground">{new Date(detail.orderDate).toLocaleDateString()}</td>
+                        <td className="py-2 text-right font-semibold text-destructive">{detail.quantityUsed}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Diamond Details */}
           <div className="card-l1">
             <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center gap-2">
               <Diamond size={13} className="text-primary" />
               <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Micro Diamond — {stone.stoneId}
+                Micro Diamond Details
               </span>
-              <Badge
-                variant={stone.isActive ? "default" : "secondary"}
-                className="ml-auto text-[10px] h-4 px-1.5"
-              >
-                {stone.isActive ? "Active" : "Inactive"}
-              </Badge>
             </div>
             <div className="px-4 py-1 text-xs">
               {(
                 [
-                  ["Stone Name", stone.stoneName],
                   ["Size", stone.size],
-                  ["Shape", stone.shape],
-                  ["Grade", stone.gradeType || "—"],
-                  ["Colour", stone.colour || "—"],
-                  ["Stones/gram", stone.stonesPerGram ?? "—"],
-                  ["Supplier", stone.supplier || "—"],
-                  ["Notes", stone.notes || "—"],
+                  ["Quantity", stone.quantity || 0],
+                  ["Weight (grams)", stone.weight || 0],
+                  ["Price per 1000", stone.price_per_1000 || 0],
+                  ["Status", stone.isActive ? "Active" : "Inactive"],
                   [
                     "Added",
-                    stone.createdAt ? stone.createdAt.slice(0, 10) : "—",
+                    stone.created_at ? stone.created_at.slice(0, 10) : "—",
                   ],
                 ] as [string, string | number][]
               ).map(([k, v]) => (
@@ -563,35 +629,66 @@ function ADDiamondFormPage({
   stone,
   onSave,
   onCancel,
+  selectedShape,
 }: {
-  stone?: ADDiamond;
+  stone?: any;
   onSave: () => void;
   onCancel: () => void;
+  selectedShape?: any;
 }) {
+  const shapes = getADShapes();
+  const [restockAmount, setRestockAmount] = useState(0);
+
   const form = useForm<ADFormValues>({
     resolver: zodResolver(adSchema) as Resolver<ADFormValues>,
     defaultValues: stone
       ? {
-          stoneName: stone.stoneName,
-          categoryId: stone.categoryId,
-          shape: stone.shape,
+          shapeId: stone.shape_id?.toString() || selectedShape?.id?.toString() || "",
           size: stone.size,
-          length: stone.length ?? undefined,
-          width: stone.width ?? undefined,
-          weight: stone.weight ?? undefined,
-          supplier: stone.supplier ?? "",
-          isActive: stone.isActive,
+          quantity: stone.quantity || 0,
+          weight: stone.weight || 0,
+          pricePerPiece: stone.price_per_piece || 0,
+          isActive: stone.isActive !== false,
         }
-      : { isActive: true, supplier: "" },
+      : { 
+          shapeId: selectedShape?.id?.toString() || "",
+          isActive: true, 
+          quantity: 0, 
+          weight: 0, 
+          pricePerPiece: 0 
+        },
   });
 
-  const onSubmit: SubmitHandler<ADFormValues> = (v) => {
+  const onSubmit: SubmitHandler<ADFormValues> = async (v) => {
     try {
+      // Ensure all numeric values are properly converted
+      const quantity = Number(v.quantity) || 0;
+      const weight = Number(v.weight) || 0;
+      const pricePerPiece = Number(v.pricePerPiece) || 0;
+      const restock = Number(restockAmount) || 0;
+
       if (stone) {
-        updateADDiamond(stone.id, v);
-        toast.success("AD diamond updated");
+        // If restocking, add to both quantity and totalQuantity
+        const finalQuantity = restock > 0 ? quantity + restock : quantity;
+        updateADDiamond(stone.id, {
+          shape_id: parseInt(v.shapeId),
+          size: v.size,
+          quantity: finalQuantity,
+          totalQuantity: restock > 0 ? (stone.totalQuantity || quantity) + restock : undefined,
+          weight,
+          price_per_piece: pricePerPiece,
+          isActive: v.isActive,
+        });
+        toast.success(restock > 0 ? `AD diamond restocked (+${restock})` : "AD diamond updated");
       } else {
-        addADDiamond(v);
+        addADDiamond({
+          shape_id: parseInt(v.shapeId),
+          size: v.size,
+          quantity,
+          weight,
+          price_per_piece: pricePerPiece,
+          isActive: v.isActive,
+        });
         toast.success("AD diamond added");
       }
       onSave();
@@ -621,7 +718,7 @@ function ADDiamondFormPage({
         <span className="text-[11px] text-muted-foreground">AD Diamond</span>
         <ChevronRight size={10} className="text-muted-foreground/40" />
         <span className="text-[11px] font-medium">
-          {stone ? `Edit: ${stone.stoneName}` : "New AD Diamond"}
+          {stone ? `Edit: ${stone.size}` : "New AD Diamond"}
         </span>
         <div className="flex-1" />
         <Button
@@ -652,44 +749,10 @@ function ADDiamondFormPage({
                 </span>
               </div>
               <div className="px-4 py-1">
-                <FieldRow label="Stone Name *">
-                  <FormField
-                    control={form.control}
-                    name="stoneName"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormControl>
-                          <Input
-                            {...field}
-                            className="h-8 text-sm"
-                            placeholder="e.g. AD Round 2×2"
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </FieldRow>
-                <FieldRow label="Category *">
-                  <FormField
-                    control={form.control}
-                    name="categoryId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <CategorySelector
-                          type="ad"
-                          value={field.value ?? ""}
-                          onChange={field.onChange}
-                        />
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </FieldRow>
                 <FieldRow label="Shape *">
                   <FormField
                     control={form.control}
-                    name="shape"
+                    name="shapeId"
                     render={({ field }) => (
                       <FormItem>
                         <Select
@@ -697,12 +760,12 @@ function ADDiamondFormPage({
                           onValueChange={field.onChange}
                         >
                           <SelectTrigger className="h-8 text-sm">
-                            <SelectValue placeholder="Shape" />
+                            <SelectValue placeholder="Select shape" />
                           </SelectTrigger>
                           <SelectContent>
-                            {SHAPES.map((s) => (
-                              <SelectItem key={s} value={s}>
-                                {s}
+                            {shapes.map((s) => (
+                              <SelectItem key={s.id} value={s.id.toString()}>
+                                {s.shape}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -730,47 +793,49 @@ function ADDiamondFormPage({
                     )}
                   />
                 </FieldRow>
-                <FieldRow label="Length (mm)">
+                <FieldRow label="Quantity *">
                   <FormField
                     control={form.control}
-                    name="length"
+                    name="quantity"
                     render={({ field }) => (
                       <FormItem>
                         <FormControl>
                           <Input
                             {...field}
                             type="number"
-                            step="0.1"
+                            step="1"
                             className="h-8 text-sm"
-                            value={field.value ?? ""}
-                            onChange={(e) => field.onChange(e.target.value)}
+                            placeholder="Number of stones"
                           />
                         </FormControl>
+                        <FormMessage />
                       </FormItem>
                     )}
                   />
                 </FieldRow>
-                <FieldRow label="Width (mm)">
-                  <FormField
-                    control={form.control}
-                    name="width"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormControl>
-                          <Input
-                            {...field}
-                            type="number"
-                            step="0.1"
-                            className="h-8 text-sm"
-                            value={field.value ?? ""}
-                            onChange={(e) => field.onChange(e.target.value)}
-                          />
-                        </FormControl>
-                      </FormItem>
-                    )}
-                  />
-                </FieldRow>
-                <FieldRow label="Weight (ct)">
+                {stone && (
+                  <FieldRow label="Restock (Add Stock)">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        step="1"
+                        min="0"
+                        value={restockAmount || ""}
+                        onChange={(e) => setRestockAmount(Number(e.target.value))}
+                        className="h-8 text-sm w-32"
+                        placeholder="0"
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {restockAmount > 0 && (
+                          <span className="text-accent font-medium">
+                            New total: {(stone.quantity || 0) + Number(restockAmount)} / {(stone.totalQuantity || stone.quantity || 0) + Number(restockAmount)}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  </FieldRow>
+                )}
+                <FieldRow label="Weight (grams) *">
                   <FormField
                     control={form.control}
                     name="weight"
@@ -782,22 +847,28 @@ function ADDiamondFormPage({
                             type="number"
                             step="0.001"
                             className="h-8 text-sm"
-                            value={field.value ?? ""}
-                            onChange={(e) => field.onChange(e.target.value)}
+                            placeholder="Total weight in grams"
                           />
                         </FormControl>
+                        <FormMessage />
                       </FormItem>
                     )}
                   />
                 </FieldRow>
-                <FieldRow label="Supplier">
+                <FieldRow label="Price per Piece">
                   <FormField
                     control={form.control}
-                    name="supplier"
+                    name="pricePerPiece"
                     render={({ field }) => (
                       <FormItem>
                         <FormControl>
-                          <Input {...field} className="h-8 text-sm" />
+                          <Input
+                            {...field}
+                            type="number"
+                            step="0.01"
+                            className="h-8 text-sm"
+                            placeholder="Price per piece"
+                          />
                         </FormControl>
                       </FormItem>
                     )}
@@ -837,11 +908,52 @@ function ADDetailPage({
   stone,
   onEdit,
   onBack,
+  onDelete,
 }: {
-  stone: ADDiamond;
+  stone: any;
   onEdit: () => void;
   onBack: () => void;
+  onDelete: () => void;
 }) {
+  const navigate = useNavigate();
+  const orders = getOrders();
+  
+  // Calculate actual usage from orders
+  const totalUsed = useMemo(() => {
+    let used = 0;
+    orders.forEach(order => {
+      if (order.stoneUsage) {
+        order.stoneUsage.forEach((usage: any) => {
+          if (usage.stoneType === 'ad' && usage.stoneId === stone.id) {
+            used += usage.quantityUsed;
+          }
+        });
+      }
+    });
+    return used;
+  }, [orders, stone.id]);
+  
+  // Get order-wise usage details
+  const orderUsageDetails = useMemo(() => {
+    const details: any[] = [];
+    orders.forEach(order => {
+      if (order.stoneUsage) {
+        order.stoneUsage.forEach((usage: any) => {
+          if (usage.stoneType === 'ad' && usage.stoneId === stone.id) {
+            details.push({
+              orderNumber: order.orderNumber,
+              orderDate: order.orderDate,
+              customerName: order.customerName,
+              quantityUsed: usage.quantityUsed,
+              orderId: order.id,
+            });
+          }
+        });
+      }
+    });
+    return details.sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime());
+  }, [orders, stone.id]);
+
   return (
     <div className="page-panel">
       <div className="page-panel-header">
@@ -861,39 +973,105 @@ function ADDetailPage({
         <ChevronRight size={10} className="text-muted-foreground/40" />
         <span className="text-[11px] text-muted-foreground">AD Diamond</span>
         <ChevronRight size={10} className="text-muted-foreground/40" />
-        <span className="text-[11px] font-medium">{stone.stoneName}</span>
+        <span className="text-[11px] font-medium">{stone.shape} - {stone.size}</span>
         <div className="flex-1" />
-        <Button size="sm" className="h-7 text-xs" onClick={onEdit}>
+        <Badge
+          variant={stone.isActive ? "default" : "secondary"}
+          className="text-[10px] h-4 px-1.5"
+        >
+          {stone.isActive ? "Active" : "Inactive"}
+        </Badge>
+        <Button size="sm" className="h-7 text-xs ml-2" onClick={onEdit}>
           <Pencil size={12} className="mr-1" />
           Edit
         </Button>
+        <Button size="sm" variant="destructive" className="h-7 text-xs ml-2" onClick={onDelete}>
+          <Trash2 size={12} className="mr-1" />
+          Delete
+        </Button>
       </div>
       <div className="page-panel-body">
-        <div className="max-w-xl mx-auto">
+        <div className="max-w-3xl mx-auto flex flex-col gap-4">
+          {/* Inventory Stats */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="card-l1 p-4 flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">Remaining / Total</span>
+              <span className="text-xl font-bold text-accent">{stone.quantity || 0} / {stone.totalQuantity || 0}</span>
+              <span className="text-[10px] text-muted-foreground">stones</span>
+            </div>
+            <div className="card-l1 p-4 flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">Used in Orders</span>
+              <span className="text-xl font-bold text-destructive cursor-pointer hover:underline" onClick={() => {}}>
+                {totalUsed}
+              </span>
+              <span className="text-[10px] text-muted-foreground">stones</span>
+            </div>
+            <div className="card-l1 p-4 flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">Total Weight</span>
+              <span className="text-xl font-bold">{stone.weight || 0}g</span>
+              <span className="text-[10px] text-muted-foreground">grams</span>
+            </div>
+          </div>
+
+          {/* Order Usage Details */}
+          {orderUsageDetails.length > 0 && (
+            <div className="card-l1">
+              <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center gap-2">
+                <FileText size={13} className="text-accent" />
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Order Usage Details
+                </span>
+              </div>
+              <div className="px-4 py-2">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left py-2 text-muted-foreground">Order #</th>
+                      <th className="text-left py-2 text-muted-foreground">Customer</th>
+                      <th className="text-left py-2 text-muted-foreground">Date</th>
+                      <th className="text-right py-2 text-muted-foreground">Used</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orderUsageDetails.map((detail, idx) => (
+                      <tr 
+                        key={idx} 
+                        className="border-b border-border/50 hover:bg-muted/30 cursor-pointer"
+                        onClick={() => navigate(`/orders/${detail.orderId}`)}
+                      >
+                        <td className="py-2 font-medium text-primary hover:underline">{detail.orderNumber}</td>
+                        <td className="py-2">{detail.customerName}</td>
+                        <td className="py-2 text-muted-foreground">{new Date(detail.orderDate).toLocaleDateString()}</td>
+                        <td className="py-2 text-right font-semibold text-destructive">{detail.quantityUsed}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Diamond Details */}
           <div className="card-l1">
             <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center gap-2">
               <Gem size={13} className="text-accent" />
               <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                AD Diamond — {stone.stoneId}
+                AD Diamond Details
               </span>
-              <Badge
-                variant={stone.isActive ? "default" : "secondary"}
-                className="ml-auto text-[10px] h-4 px-1.5"
-              >
-                {stone.isActive ? "Active" : "Inactive"}
-              </Badge>
             </div>
             <div className="px-4 py-1 text-xs">
               {(
                 [
-                  ["Stone Name", stone.stoneName],
                   ["Shape", stone.shape],
                   ["Size", stone.size],
-                  ["Length", stone.length ? `${stone.length} mm` : "—"],
-                  ["Width", stone.width ? `${stone.width} mm` : "—"],
-                  ["Weight", stone.weight ? `${stone.weight} ct` : "—"],
-                  ["Supplier", stone.supplier || "—"],
-                  ["Notes", stone.notes || "—"],
+                  ["Quantity", stone.quantity || 0],
+                  ["Weight (grams)", stone.weight || 0],
+                  ["Price per Piece", stone.price_per_piece || 0],
+                  ["Status", stone.isActive ? "Active" : "Inactive"],
+                  [
+                    "Added",
+                    stone.created_at ? stone.created_at.slice(0, 10) : "—",
+                  ],
                 ] as [string, string | number][]
               ).map(([k, v]) => (
                 <div
@@ -918,36 +1096,20 @@ function MicroListPage({
   onAdd,
   onSelect,
   onBack,
+  forceReload,
 }: {
   onAdd: () => void;
-  onSelect: (s: MicroDiamond) => void;
+  onSelect: (s: any) => void;
   onBack: () => void;
+  forceReload?: number;
 }) {
-  const [stones, setStones] = useState<MicroDiamond[]>(() =>
-    getMicroDiamonds(),
-  );
+  const sizes = getMicroDiamonds();
   const [search, setSearch] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<MicroDiamond | null>(null);
-  const refresh = useCallback(() => setStones(getMicroDiamonds()), []);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return stones.filter(
-      (s) =>
-        !q ||
-        s.stoneName.toLowerCase().includes(q) ||
-        s.size.toLowerCase().includes(q) ||
-        s.shape.toLowerCase().includes(q),
-    );
-  }, [stones, search]);
-
-  const handleDelete = () => {
-    if (!deleteTarget) return;
-    deleteMicroDiamond(deleteTarget.id);
-    toast.success("Stone deleted");
-    setDeleteTarget(null);
-    refresh();
-  };
+    return sizes.filter((s) => !q || s.size.toLowerCase().includes(q));
+  }, [sizes, search]);
 
   return (
     <div className="flex flex-col h-full">
@@ -956,8 +1118,8 @@ function MicroListPage({
           { label: "Stones", onClick: onBack },
           { label: "Micro Diamond" },
         ]}
-        title="Micro Diamond"
-        subtitle={`${stones.length} stones`}
+        title="Micro Diamond Sizes"
+        subtitle={`${sizes.length} sizes`}
         actions={
           <Button size="sm" className="h-7 text-xs" onClick={onAdd}>
             <Plus size={12} className="mr-1" />
@@ -969,168 +1131,95 @@ function MicroListPage({
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="Search name, size, shape…"
+          placeholder="Search size…"
           className="w-60 h-7 text-xs"
         />
         <span className="ml-auto text-xs text-muted-foreground">
-          {filtered.length} record{filtered.length !== 1 ? "s" : ""}
+          {filtered.length} size{filtered.length !== 1 ? "s" : ""}
         </span>
       </div>
       <div className="erp-content">
-        <div className="overflow-x-auto">
-          <table className="erp-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Name</th>
-                <th>Size</th>
-                <th>Shape</th>
-                <th>Grade</th>
-                <th>Colour</th>
-                <th>Stones/g</th>
-                <th>Supplier</th>
-                <th>Status</th>
-                <th className="text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={10}
-                    className="py-12 text-center text-sm text-muted-foreground"
-                  >
-                    No micro diamonds found.
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((s) => (
-                  <tr
-                    key={s.id}
-                    className="cursor-pointer"
-                    onClick={() => onSelect(s)}
-                  >
-                    <td className="text-xs text-muted-foreground font-mono">
-                      {s.stoneId}
-                    </td>
-                    <td className="font-medium text-xs text-primary hover:underline">
-                      {s.stoneName}
-                    </td>
-                    <td>
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] h-4 px-1.5"
-                      >
-                        {s.size}
-                      </Badge>
-                    </td>
-                    <td className="text-xs">{s.shape}</td>
-                    <td className="text-xs text-muted-foreground">
-                      {s.gradeType || "—"}
-                    </td>
-                    <td className="text-xs text-muted-foreground">
-                      {s.colour || "—"}
-                    </td>
-                    <td className="text-xs">{s.stonesPerGram ?? "—"}</td>
-                    <td className="text-xs text-muted-foreground">
-                      {s.supplier || "—"}
-                    </td>
-                    <td>
-                      <Badge
-                        variant={s.isActive ? "default" : "secondary"}
-                        className="text-[10px] h-4 px-1.5"
-                      >
-                        {s.isActive ? "Active" : "Inactive"}
-                      </Badge>
-                    </td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <div className="flex gap-0.5 justify-end">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="w-6 h-6"
-                          onClick={() => onSelect(s)}
-                        >
-                          <Pencil size={11} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="w-6 h-6 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(s)}
-                        >
-                          <Trash2 size={11} />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-        {deleteTarget && (
-          <div className="sticky bottom-0 p-3 bg-card border-t border-border">
-            <div className="confirm-bar">
-              <AlertTriangle size={14} className="text-destructive shrink-0" />
-              <span className="flex-1 text-xs">
-                Delete <strong>{deleteTarget.stoneName}</strong>? This cannot be
-                undone.
-              </span>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 text-xs"
-                onClick={() => setDeleteTarget(null)}
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                className="h-6 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                onClick={handleDelete}
-              >
-                Delete
-              </Button>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 p-4">
+          {filtered.length === 0 ? (
+            <div className="col-span-full py-16 text-center text-sm text-muted-foreground">
+              {search ? "No sizes match." : "No micro diamonds yet."}
             </div>
-          </div>
-        )}
+          ) : (
+            filtered.map((s) => (
+              <div
+                key={s.id}
+                className="card-l1 p-4 cursor-pointer hover:border-primary/50 transition-colors"
+                onClick={() => onSelect(s)}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                    <Diamond size={18} className="text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm text-primary hover:underline truncate">
+                      {s.size}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
+                      <div>
+                        <span className="text-muted-foreground">Stock:</span>
+                        <span className="font-semibold ml-1">{s.quantity || 0} / {s.totalQuantity || 0}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Weight:</span>
+                        <span className="font-semibold ml-1">{s.weight || 0}g</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Price/1k:</span>
+                        <span className="font-semibold ml-1">₹{s.price_per_1000 || 0}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function ADListPage({
+function ADShapesPage({
   onAdd,
   onSelect,
   onBack,
+  forceReload,
 }: {
   onAdd: () => void;
-  onSelect: (s: ADDiamond) => void;
+  onSelect: (s: any) => void;
   onBack: () => void;
+  forceReload?: number;
 }) {
-  const [stones, setStones] = useState<ADDiamond[]>(() => getADDiamonds());
+  const shapes = getADShapes();
   const [search, setSearch] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<ADDiamond | null>(null);
-  const refresh = useCallback(() => setStones(getADDiamonds()), []);
+  const [showAddShape, setShowAddShape] = useState(false);
+  const [newShapeName, setNewShapeName] = useState("");
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return stones.filter(
-      (s) =>
-        !q ||
-        s.stoneName.toLowerCase().includes(q) ||
-        s.size.toLowerCase().includes(q) ||
-        s.shape.toLowerCase().includes(q),
-    );
-  }, [stones, search]);
+    return shapes.filter((s) => !q || s.shape.toLowerCase().includes(q));
+  }, [shapes, search]);
 
-  const handleDelete = () => {
-    if (!deleteTarget) return;
-    deleteADDiamond(deleteTarget.id);
-    toast.success("Stone deleted");
-    setDeleteTarget(null);
-    refresh();
+  const handleAddShape = () => {
+    if (!newShapeName.trim()) {
+      toast.error("Shape name is required");
+      return;
+    }
+    addADShape(newShapeName.trim());
+    toast.success("Shape added successfully");
+    setNewShapeName("");
+    setShowAddShape(false);
+  };
+
+  const handleDeleteShape = (shapeId: number) => {
+    if (!confirm("Are you sure you want to delete this shape? All AD diamonds with this shape will also be deleted.")) return;
+    deleteADShape(shapeId);
+    toast.success("Shape deleted successfully");
   };
 
   return (
@@ -1140,10 +1229,131 @@ function ADListPage({
           { label: "Stones", onClick: onBack },
           { label: "AD Diamond" },
         ]}
-        title="AD Diamond"
-        subtitle={`${stones.length} stones`}
+        title="AD Diamond Shapes"
+        subtitle={`${shapes.length} shapes`}
         actions={
-          <Button size="sm" className="h-7 text-xs" onClick={onAdd}>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShowAddShape(true)}>
+              <Plus size={12} className="mr-1" />
+              Add Shape
+            </Button>
+            <Button size="sm" className="h-7 text-xs" onClick={onAdd}>
+              <Plus size={12} className="mr-1" />
+              Add AD Diamond
+            </Button>
+          </div>
+        }
+      />
+      <div className="erp-content">
+        {/* Add Shape Dialog */}
+        {showAddShape && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="card-l1 p-6 w-full max-w-md">
+              <h3 className="text-sm font-semibold mb-4">Add New AD Diamond Shape</h3>
+              <Input
+                value={newShapeName}
+                onChange={(e) => setNewShapeName(e.target.value)}
+                placeholder="Enter shape name (e.g., Radiant, Asscher)"
+                className="h-8 text-sm mb-4"
+                autoFocus
+              />
+              <div className="flex gap-2 justify-end">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  onClick={() => {
+                    setShowAddShape(false);
+                    setNewShapeName("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button size="sm" className="h-7 text-xs" onClick={handleAddShape}>
+                  Add Shape
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 p-4">
+          {shapes.length === 0 ? (
+            <div className="col-span-full py-16 text-center text-sm text-muted-foreground">
+              No AD diamond shapes yet. Click "Add Shape" to create one.
+            </div>
+          ) : (
+            shapes.map((s) => (
+              <div
+                key={s.id}
+                className="card-l1 p-4 cursor-pointer hover:border-accent/50 transition-colors group"
+              >
+                <div className="flex items-center gap-3" onClick={() => onSelect(s)}>
+                  <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center shrink-0">
+                    <Gem size={18} className="text-accent" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm text-accent hover:underline truncate">
+                      {s.shape}
+                    </div>
+                  </div>
+                  <ChevronRight size={14} className="text-muted-foreground" />
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteShape(s.id);
+                  }}
+                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-destructive hover:text-destructive/80"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ADSizesPage({
+  shape,
+  onAdd,
+  onSelect,
+  onBack,
+  forceReload,
+}: {
+  shape: any;
+  onAdd: () => void;
+  onSelect: (size: any) => void;
+  onBack: () => void;
+  forceReload?: number;
+}) {
+  const allADDiamonds = getADDiamonds();
+  const sizes = allADDiamonds.filter((d) => d.shape_id === shape.id);
+  const [search, setSearch] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return sizes.filter((s) => !q || s.size.toLowerCase().includes(q));
+  }, [sizes, search]);
+
+  const handleAdd = () => {
+    onAdd();
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      <PageToolbar
+        breadcrumbs={[
+          { label: "Stones", onClick: onBack },
+          { label: "AD Diamond", onClick: onBack },
+          { label: shape.shape },
+        ]}
+        title={`${shape.shape} Sizes`}
+        subtitle={`${sizes.length} sizes`}
+        actions={
+          <Button size="sm" className="h-7 text-xs" onClick={handleAdd}>
             <Plus size={12} className="mr-1" />
             Add AD Diamond
           </Button>
@@ -1153,130 +1363,54 @@ function ADListPage({
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="Search name, size, shape…"
+          placeholder="Search size…"
           className="w-60 h-7 text-xs"
         />
         <span className="ml-auto text-xs text-muted-foreground">
-          {filtered.length} record{filtered.length !== 1 ? "s" : ""}
+          {filtered.length} size{filtered.length !== 1 ? "s" : ""}
         </span>
       </div>
       <div className="erp-content">
-        <div className="overflow-x-auto">
-          <table className="erp-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Name</th>
-                <th>Shape</th>
-                <th>Size</th>
-                <th>L×W (mm)</th>
-                <th>Weight (ct)</th>
-                <th>Supplier</th>
-                <th>Status</th>
-                <th className="text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={9}
-                    className="py-12 text-center text-sm text-muted-foreground"
-                  >
-                    No AD diamonds found.
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((s) => (
-                  <tr
-                    key={s.id}
-                    className="cursor-pointer"
-                    onClick={() => onSelect(s)}
-                  >
-                    <td className="text-xs text-muted-foreground font-mono">
-                      {s.stoneId}
-                    </td>
-                    <td className="font-medium text-xs text-primary hover:underline">
-                      {s.stoneName}
-                    </td>
-                    <td className="text-xs">{s.shape}</td>
-                    <td>
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] h-4 px-1.5"
-                      >
-                        {s.size}
-                      </Badge>
-                    </td>
-                    <td className="text-xs text-muted-foreground">
-                      {s.length && s.width ? `${s.length}×${s.width}` : "—"}
-                    </td>
-                    <td className="text-xs text-muted-foreground">
-                      {s.weight ?? "—"}
-                    </td>
-                    <td className="text-xs text-muted-foreground">
-                      {s.supplier || "—"}
-                    </td>
-                    <td>
-                      <Badge
-                        variant={s.isActive ? "default" : "secondary"}
-                        className="text-[10px] h-4 px-1.5"
-                      >
-                        {s.isActive ? "Active" : "Inactive"}
-                      </Badge>
-                    </td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <div className="flex gap-0.5 justify-end">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="w-6 h-6"
-                          onClick={() => onSelect(s)}
-                        >
-                          <Pencil size={11} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="w-6 h-6 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(s)}
-                        >
-                          <Trash2 size={11} />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-        {deleteTarget && (
-          <div className="sticky bottom-0 p-3 bg-card border-t border-border">
-            <div className="confirm-bar">
-              <AlertTriangle size={14} className="text-destructive shrink-0" />
-              <span className="flex-1 text-xs">
-                Delete <strong>{deleteTarget.stoneName}</strong>? This cannot be
-                undone.
-              </span>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 text-xs"
-                onClick={() => setDeleteTarget(null)}
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                className="h-6 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                onClick={handleDelete}
-              >
-                Delete
-              </Button>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 p-4">
+          {filtered.length === 0 ? (
+            <div className="col-span-full py-16 text-center text-sm text-muted-foreground">
+              {search ? "No sizes match." : `No ${shape.shape} diamonds yet.`}
             </div>
-          </div>
-        )}
+          ) : (
+            filtered.map((s) => (
+              <div
+                key={s.id}
+                className="card-l1 p-4 cursor-pointer hover:border-accent/50 transition-colors"
+                onClick={() => onSelect(s)}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center shrink-0">
+                    <Gem size={18} className="text-accent" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm text-accent hover:underline truncate">
+                      {s.size}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
+                      <div>
+                        <span className="text-muted-foreground">Stock:</span>
+                        <span className="font-semibold ml-1">{s.quantity || 0} / {s.totalQuantity || 0}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Weight:</span>
+                        <span className="font-semibold ml-1">{s.weight || 0}g</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Price/pc:</span>
+                        <span className="font-semibold ml-1">₹{s.price_per_piece || 0}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1291,8 +1425,9 @@ function StonesLanding({
   onMicro: () => void;
   onAD: () => void;
 }) {
-  const microCount = useMemo(() => getMicroDiamonds().length, []);
-  const adCount = useMemo(() => getADDiamonds().length, []);
+  const microCount = getMicroDiamonds().length;
+  const adCount = getADShapes().length;
+
   return (
     <div className="flex flex-col h-full">
       <PageToolbar
@@ -1363,13 +1498,49 @@ function StonesLanding({
 
 export default function StonesPage() {
   const [view, setView] = useState<ViewMode>("landing");
-  const [selectedMicro, setSelectedMicro] = useState<
-    MicroDiamond | undefined
-  >();
-  const [selectedAD, setSelectedAD] = useState<ADDiamond | undefined>();
+  const [selectedMicro, setSelectedMicro] = useState<any>(undefined);
+  const [selectedAD, setSelectedAD] = useState<any>(undefined);
+  const [selectedShape, setSelectedShape] = useState<any>(undefined);
+  const [reloadCounter, setReloadCounter] = useState(0);
 
-  const handleSavedMicro = () => setView("micro-list");
-  const handleSavedAD = () => setView("ad-list");
+  const handleSavedMicro = () => {
+    setReloadCounter(c => c + 1);
+    setView("micro-list");
+  };
+  const handleSavedAD = () => {
+    setReloadCounter(c => c + 1);
+    setView("ad-sizes");
+  };
+
+  const handleDeleteMicro = async () => {
+    if (!selectedMicro) return;
+    if (!confirm('Are you sure you want to delete this micro diamond?')) return;
+    try {
+      deleteMicroDiamond(selectedMicro.id);
+      toast.success('Micro diamond deleted');
+      setSelectedMicro(undefined);
+      setReloadCounter(c => c + 1);
+      setView('micro-list');
+    } catch (error) {
+      console.error('Failed to delete micro diamond:', error);
+      toast.error('Failed to delete micro diamond');
+    }
+  };
+
+  const handleDeleteAD = async () => {
+    if (!selectedAD) return;
+    if (!confirm('Are you sure you want to delete this AD diamond?')) return;
+    try {
+      deleteADDiamond(selectedAD.id);
+      toast.success('AD diamond deleted');
+      setSelectedAD(undefined);
+      setReloadCounter(c => c + 1);
+      setView('ad-sizes');
+    } catch (error) {
+      console.error('Failed to delete AD diamond:', error);
+      toast.error('Failed to delete AD diamond');
+    }
+  };
 
   if (view === "micro-add")
     return (
@@ -1392,19 +1563,22 @@ export default function StonesPage() {
         stone={selectedMicro}
         onEdit={() => setView("micro-edit")}
         onBack={() => setView("micro-list")}
+        onDelete={handleDeleteMicro}
       />
     );
   if (view === "ad-add")
     return (
       <ADDiamondFormPage
+        selectedShape={selectedShape}
         onSave={handleSavedAD}
-        onCancel={() => setView("ad-list")}
+        onCancel={() => selectedShape ? setView("ad-sizes") : setView("ad-shapes")}
       />
     );
   if (view === "ad-edit")
     return (
       <ADDiamondFormPage
         stone={selectedAD}
+        selectedShape={selectedShape}
         onSave={handleSavedAD}
         onCancel={() => setView("ad-detail")}
       />
@@ -1414,12 +1588,14 @@ export default function StonesPage() {
       <ADDetailPage
         stone={selectedAD}
         onEdit={() => setView("ad-edit")}
-        onBack={() => setView("ad-list")}
+        onBack={() => setView("ad-sizes")}
+        onDelete={handleDeleteAD}
       />
     );
   if (view === "micro-list")
     return (
       <MicroListPage
+        forceReload={reloadCounter}
         onAdd={() => setView("micro-add")}
         onSelect={(s) => {
           setSelectedMicro(s);
@@ -1428,22 +1604,39 @@ export default function StonesPage() {
         onBack={() => setView("landing")}
       />
     );
-  if (view === "ad-list")
+  if (view === "ad-shapes")
     return (
-      <ADListPage
+      <ADShapesPage
+        forceReload={reloadCounter}
+        onAdd={() => {
+          setSelectedShape(undefined);
+          setView("ad-add");
+        }}
+        onSelect={(s) => {
+          setSelectedShape(s);
+          setView("ad-sizes");
+        }}
+        onBack={() => setView("landing")}
+      />
+    );
+  if (view === "ad-sizes" && selectedShape)
+    return (
+      <ADSizesPage
+        shape={selectedShape}
+        forceReload={reloadCounter}
         onAdd={() => setView("ad-add")}
         onSelect={(s) => {
           setSelectedAD(s);
           setView("ad-detail");
         }}
-        onBack={() => setView("landing")}
+        onBack={() => setView("ad-shapes")}
       />
     );
 
   return (
     <StonesLanding
       onMicro={() => setView("micro-list")}
-      onAD={() => setView("ad-list")}
+      onAD={() => setView("ad-shapes")}
     />
   );
 }

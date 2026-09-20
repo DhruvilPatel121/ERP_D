@@ -20,6 +20,7 @@ import {
   ImagePlus,
   ZoomIn,
   Trash,
+  Trash2,
 } from "lucide-react";
 import {
   getPatterns,
@@ -761,10 +762,12 @@ function PatternDetailPage({
   pattern,
   onEdit,
   onBack,
+  onDelete,
 }: {
   pattern: Pattern;
   onEdit: () => void;
   onBack: () => void;
+  onDelete: () => void;
 }) {
   const [lightbox, setLightbox] = useState<string | null>(null);
   return (
@@ -815,6 +818,10 @@ function PatternDetailPage({
         <Button size="sm" className="h-7 text-xs ml-2" onClick={onEdit}>
           <Pencil size={12} className="mr-1" />
           Edit
+        </Button>
+        <Button size="sm" variant="destructive" className="h-7 text-xs ml-2" onClick={onDelete}>
+          <Trash2 size={12} className="mr-1" />
+          Delete
         </Button>
       </div>
       <div className="page-panel-body">
@@ -1034,6 +1041,9 @@ export default function PatternsPage() {
         pattern={fresh}
         onEdit={() => setView("edit")}
         onBack={() => setView("list")}
+        onDelete={() => {
+          setDeleteTarget(fresh);
+        }}
       />
     );
   }

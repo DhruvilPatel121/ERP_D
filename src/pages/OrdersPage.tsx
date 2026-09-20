@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   useForm,
   useFieldArray,
@@ -33,6 +34,12 @@ import {
   getPatterns,
   getAppSettings,
   updateOrder,
+  getKarigars,
+  findKarigarForPattern,
+  getMicroDiamonds,
+  getADDiamonds,
+  updateMicroDiamond,
+  updateADDiamond,
 } from "@/lib/db";
 import { calculateGramOrder, calculatePieceOrder } from "@/lib/calculations";
 import { formatDate, nanoid } from "@/lib/utils";
@@ -40,6 +47,7 @@ import { ORDER_STATUS_LABELS } from "@/lib/orderStatus";
 import { PageToolbar } from "@/components/layouts/AppLayout";
 import { SearchInput } from "@/components/common/SearchInput";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import { Combobox, type ComboboxOption } from "@/components/common/Combobox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -90,7 +98,11 @@ const orderSchema = z.object({
   // Explicit order-level quantity type chosen by user at creation time
   orderQuantityType: z.enum(["grams", "pieces", "mixed"]).default("pieces"),
   notes: z.string().default(""),
+  touch: z.string().default(""),
   items: z.array(orderItemSchema).min(1, "Add at least one pattern item"),
+  // Karigar assignment during order creation
+  waxKarigarId: z.string().optional(),
+  stoneKarigarId: z.string().optional(),
 });
 type OrderFormValues = z.infer<typeof orderSchema>;
 
@@ -321,414 +333,19 @@ function OrderShareCard({ order }: { order: Order }) {
   );
 }
 
-// ── Order Detail Full Page ────────────────────────────────────────────────────
-function OrderDetailPage({
-  order: initialOrder,
-  onBack,
-  onStatusChange,
-}: {
-  order: Order;
-  onBack: () => void;
-  onStatusChange: (id: string, status: OrderStatus) => void;
-}) {
-  const cardRef = useRef<HTMLDivElement>(null);
-  const [order, setOrder] = useState(initialOrder);
-  const totalPieces = order.items.reduce(
-    (s, i) => s + i.calculation.finishedPieces,
-    0,
-  );
-  const totalStones = order.items.reduce(
-    (s, i) => s + i.calculation.totalStones,
-    0,
-  );
-  const totalTrees = order.items.reduce(
-    (s, i) => s + i.calculation.waxTreesRequired,
-    0,
-  );
-
-  const handleShareJPG = async () => {
-    if (!cardRef.current) return;
-    try {
-      const canvas = await html2canvas(cardRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-      });
-      const blob = await new Promise<Blob>((res) =>
-        canvas.toBlob((b) => res(b!), "image/jpeg", 0.92),
-      );
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${order.orderNumber}.jpg`;
-      a.click();
-      URL.revokeObjectURL(url);
-      const wa = order.customerWhatsapp || order.customerMobile;
-      const num = wa.replace(/\D/g, "");
-      setTimeout(
-        () =>
-          window.open(
-            `https://wa.me/${num.startsWith("91") ? num : "91" + num}`,
-            "_blank",
-          ),
-        400,
-      );
-      toast.success("JPG downloaded — attach it in WhatsApp");
-    } catch (e) {
-      toast.error("Failed to generate image");
-      console.error(e);
-    }
-  };
-
-  const statuses: OrderStatus[] = [
-    "draft",
-    "confirmed",
-    "pending",
-    "assigned",
-    "wax_in_progress",
-    "wax_completed",
-    "stone_setting_pending",
-    "stone_setting_in_progress",
-    "stone_setting_completed",
-    "production_completed",
-    "ready",
-    "delivered",
-    "cancelled",
-  ];
-
-  const handleStatusChange = (status: OrderStatus) => {
-    const updated = updateOrder(order.id, {
-      status,
-      statusHistory: [
-        ...order.statusHistory,
-        {
-          status,
-          changedAt: new Date().toISOString(),
-          changedBy: "admin",
-          notes: "",
-        },
-      ],
-    });
-    if (updated) {
-      setOrder(updated);
-      onStatusChange(order.id, status);
-      toast.success(`Status → ${status.replace(/_/g, " ")}`);
-    }
-  };
-
-  return (
-    <div className="page-panel">
-      <div className="page-panel-header">
-        <button
-          onClick={onBack}
-          className="text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft size={13} />
-        </button>
-        <Separator orientation="vertical" className="h-4" />
-        <span
-          className="text-[11px] text-muted-foreground cursor-pointer hover:text-foreground"
-          onClick={onBack}
-        >
-          Orders
-        </span>
-        <ChevronRight size={10} className="text-muted-foreground/40" />
-        <span className="text-[11px] font-medium">{order.orderNumber}</span>
-        <div className="flex-1" />
-        <StatusBadge status={order.status} />
-        <Select
-          value={order.status}
-          onValueChange={(v) => handleStatusChange(v as OrderStatus)}
-        >
-          <SelectTrigger className="h-7 w-44 text-xs ml-2">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {statuses.map((s) => (
-              <SelectItem key={s} value={s}>
-                {s.replace(/_/g, " ")}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 text-xs ml-2"
-          onClick={handleShareJPG}
-        >
-          <Share2 size={12} className="mr-1" />
-          Share JPG
-        </Button>
-      </div>
-
-      <div className="page-panel-body">
-        <div className="max-w-3xl mx-auto flex flex-col gap-4">
-          {/* Stat cards — 4 cards, Qty Type added */}
-          <div className="grid grid-cols-4 gap-3">
-            <div className="card-l1 p-4 flex flex-col gap-1">
-              <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
-                <Package size={11} />
-                Total Pieces
-              </div>
-              <span className="text-xl font-bold">{totalPieces}</span>
-            </div>
-            <div className="card-l1 p-4 flex flex-col gap-1">
-              <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
-                <Filter size={11} />
-                Wax Trees
-              </div>
-              <span className="text-xl font-bold">{totalTrees}</span>
-            </div>
-            <div className="card-l1 p-4 flex flex-col gap-1">
-              <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
-                <Calendar size={11} />
-                Total Stones
-              </div>
-              <span className="text-xl font-bold">
-                {totalStones.toLocaleString()}
-              </span>
-            </div>
-            <div className="card-l1 p-4 flex flex-col gap-1">
-              <div className="flex items-center gap-1 text-xs text-muted-foreground mb-2">
-                <Scale size={11} />
-                Qty Type
-              </div>
-              <OrderQtyTypeBadge type={order.orderType} />
-            </div>
-          </div>
-
-          {/* Order info */}
-          <div className="card-l1">
-            <div className="px-4 py-2.5 border-b border-border bg-muted/30">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Order Info
-              </span>
-            </div>
-            <div className="px-4 py-1 text-xs">
-              {/* plain text rows */}
-              {(
-                [
-                  ["Order #", order.orderNumber],
-                  ["Party", order.customerName],
-                  ["Mobile", order.customerMobile],
-                  ["Date", formatDate(order.orderDate)],
-                  ["Status", order.status.replace(/_/g, " ")],
-                  ["Notes", order.notes || "—"],
-                ] as [string, string][]
-              ).map(([k, v]) => (
-                <div
-                  key={k}
-                  className="grid grid-cols-[140px_1fr] gap-3 py-1.5 border-b border-border/50 last:border-0"
-                >
-                  <span className="text-muted-foreground text-right">{k}</span>
-                  <strong className="font-medium">{v}</strong>
-                </div>
-              ))}
-              {/* Qty Type row — uses badge */}
-              <div className="grid grid-cols-[140px_1fr] gap-3 py-1.5">
-                <span className="text-muted-foreground text-right">
-                  Qty Type
-                </span>
-                <div>
-                  <OrderQtyTypeBadge type={order.orderType} />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Items */}
-          <div className="card-l1">
-            <div className="px-4 py-2.5 border-b border-border bg-muted/30">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Items ({order.items.length})
-              </span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="erp-table">
-                <thead>
-                  <tr>
-                    <th>Pattern</th>
-                    <th>Type</th>
-                    <th>Qty</th>
-                    <th>Fin. Pcs</th>
-                    <th>Trees</th>
-                    <th>Stones</th>
-                    <th>Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {order.items.map((item) => (
-                    <tr key={item.id}>
-                      <td>
-                        <div className="font-medium text-xs">
-                          {item.snapshot.patternNumber}
-                        </div>
-                        <div className="text-[11px] text-muted-foreground">
-                          {item.snapshot.patternName}
-                        </div>
-                      </td>
-                      <td>
-                        <Badge
-                          variant="outline"
-                          className={[
-                            "text-[10px] h-4 px-1.5 gap-0.5",
-                            item.quantityType === "grams"
-                              ? "border-amber-500/60 text-amber-700"
-                              : "border-blue-500/60 text-blue-700",
-                          ].join(" ")}
-                        >
-                          {item.quantityType === "grams" ? (
-                            <Scale size={9} />
-                          ) : (
-                            <Hash size={9} />
-                          )}
-                          {item.quantityType === "grams" ? "Grams" : "Pieces"}
-                        </Badge>
-                      </td>
-                      <td className="text-xs font-semibold">
-                        {item.orderQuantity}
-                        {item.quantityType === "grams" ? "g" : " pcs"}
-                      </td>
-                      <td className="text-xs font-semibold text-primary">
-                        {item.calculation.finishedPieces}
-                      </td>
-                      <td className="text-xs">
-                        {item.calculation.waxTreesRequired}
-                      </td>
-                      <td className="text-xs text-accent font-medium">
-                        {item.calculation.totalStones.toLocaleString()}
-                      </td>
-                      <td className="text-xs text-muted-foreground">
-                        {item.notes || "—"}
-                      </td>
-                    </tr>
-                  ))}
-                  <tr className="bg-muted/20 font-semibold">
-                    <td colSpan={2} className="text-right text-xs pr-2">
-                      Total
-                    </td>
-                    <td className="text-xs text-primary">{totalPieces}</td>
-                    <td className="text-xs">{totalTrees}</td>
-                    <td className="text-xs text-accent">
-                      {totalStones.toLocaleString()}
-                    </td>
-                    <td></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Karigar assignments */}
-          {order.karigarAssignments.length > 0 && (
-            <div className="card-l1">
-              <div className="px-4 py-2.5 border-b border-border bg-muted/30">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Karigar Assignments
-                </span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="erp-table">
-                  <thead>
-                    <tr>
-                      <th>Type</th>
-                      <th>Karigar</th>
-                      <th>Assigned At</th>
-                      <th>Notes</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {order.karigarAssignments.map((a, i) => (
-                      <tr key={i}>
-                        <td>
-                          <Badge
-                            variant="outline"
-                            className="text-[10px] h-4 px-1.5 capitalize"
-                          >
-                            {a.type}
-                          </Badge>
-                        </td>
-                        <td className="text-xs font-medium">{a.karigarName}</td>
-                        <td className="text-xs text-muted-foreground">
-                          {formatDate(a.assignedAt)}
-                        </td>
-                        <td className="text-xs text-muted-foreground">
-                          {a.notes || "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* Status history */}
-          {order.statusHistory.length > 0 && (
-            <div className="card-l1">
-              <div className="px-4 py-2.5 border-b border-border bg-muted/30">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Status History
-                </span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="erp-table">
-                  <thead>
-                    <tr>
-                      <th>Status</th>
-                      <th>Changed At</th>
-                      <th>By</th>
-                      <th>Notes</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...order.statusHistory].reverse().map((h, i) => (
-                      <tr key={i}>
-                        <td>
-                          <StatusBadge status={h.status} />
-                        </td>
-                        <td className="text-xs text-muted-foreground">
-                          {formatDate(h.changedAt)}
-                        </td>
-                        <td className="text-xs">{h.changedBy}</td>
-                        <td className="text-xs text-muted-foreground">
-                          {h.notes || "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Off-screen share card */}
-      <div style={{ position: "fixed", left: -9999, top: -9999, zIndex: -1 }}>
-        <div ref={cardRef}>
-          <OrderShareCard order={order} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Party Orders Page ─────────────────────────────────────────────────────────
 function PartyOrdersPage({
   partyName,
   orders,
-  onOrder,
   onBack,
   onStatusChange,
 }: {
   partyName: string;
   orders: Order[];
-  onOrder: (o: Order) => void;
   onBack: () => void;
   onStatusChange: (id: string, status: OrderStatus) => void;
 }) {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [yearFilter, setYearFilter] = useState("all");
@@ -919,7 +536,7 @@ function PartyOrdersPage({
                     <tr
                       key={o.id}
                       className="cursor-pointer hover:bg-muted/20"
-                      onClick={() => onOrder(o)}
+                      onClick={() => navigate(`/orders/${o.id}`)}
                     >
                       <td className="font-semibold text-xs text-primary hover:underline">
                         {o.orderNumber}
@@ -972,6 +589,13 @@ function OrderItemRow({
   form: ReturnType<typeof useForm<OrderFormValues>>;
 }) {
   const { control, setValue, getValues } = form;
+
+  const patternOptions: ComboboxOption[] = useMemo(() => 
+    patterns
+      .filter((p) => p.isActive)
+      .map((p) => ({ value: p.id, label: `${p.patternNumber} — ${p.patternName}` })),
+    [patterns]
+  );
 
   // Watch the three reactive fields for this row
   const patternId = useWatch({
@@ -1046,25 +670,19 @@ function OrderItemRow({
   const isGrams = quantityType === "grams";
 
   return (
-    <tr className="align-top">
+    <tr className="border-b border-border hover:bg-muted/30">
       {/* Pattern selector */}
-      <td className="w-52">
-        <Select value={patternId ?? ""} onValueChange={handlePatternChange}>
-          <SelectTrigger className="h-7 text-xs">
-            <SelectValue placeholder="Select pattern" />
-          </SelectTrigger>
-          <SelectContent>
-            {patterns
-              .filter((p) => p.isActive)
-              .map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.patternNumber} — {p.patternName}
-                </SelectItem>
-              ))}
-          </SelectContent>
-        </Select>
+      <td className="px-3 py-2 border-r border-border">
+        <Combobox
+          options={patternOptions}
+          value={patternId ?? ""}
+          onChange={handlePatternChange}
+          placeholder="Select pattern"
+          searchPlaceholder="Search patterns..."
+          className="h-8"
+        />
         {pattern && (
-          <div className="text-[10px] text-muted-foreground mt-0.5 pl-0.5">
+          <div className="text-[10px] text-muted-foreground mt-1 pl-0.5">
             {pattern.patternSize ? `${pattern.patternSize} · ` : ""}
             {pattern.weightPerPiece}g/pc · tree {pattern.treeSize}
           </div>
@@ -1072,13 +690,13 @@ function OrderItemRow({
       </td>
 
       {/* Grams / Pieces toggle — prominent radio-style buttons */}
-      <td className="w-32">
+      <td className="px-3 py-2 border-r border-border">
         <div className="flex rounded-md border border-border overflow-hidden">
           <button
             type="button"
             onClick={() => handleTypeToggle("grams")}
             className={[
-              "flex-1 flex items-center justify-center gap-1 py-1 text-[11px] font-medium transition-colors",
+              "flex-1 flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium transition-colors",
               isGrams
                 ? "bg-amber-500/15 text-amber-700 border-r border-amber-400/40"
                 : "bg-background text-muted-foreground hover:bg-muted/40 border-r border-border",
@@ -1090,7 +708,7 @@ function OrderItemRow({
             type="button"
             onClick={() => handleTypeToggle("pieces")}
             className={[
-              "flex-1 flex items-center justify-center gap-1 py-1 text-[11px] font-medium transition-colors",
+              "flex-1 flex items-center justify-center gap-1 py-1.5 text-[11px] font-medium transition-colors",
               !isGrams
                 ? "bg-blue-500/15 text-blue-700"
                 : "bg-background text-muted-foreground hover:bg-muted/40",
@@ -1099,19 +717,19 @@ function OrderItemRow({
             <Hash size={10} />P
           </button>
         </div>
-        <div className="text-[10px] text-muted-foreground text-center mt-0.5">
+        <div className="text-[10px] text-muted-foreground text-center mt-1">
           {isGrams ? "Grams" : "Pieces"}
         </div>
       </td>
 
       {/* Quantity input — fully controlled via RHF Controller */}
-      <td className="w-28">
+      <td className="px-3 py-2 border-r border-border">
         <div className="flex items-center">
           <Input
             type="number"
             step={isGrams ? "0.001" : "1"}
             min={isGrams ? 0.001 : 1}
-            className="h-7 text-xs"
+            className="h-8 text-xs"
             value={orderQty > 0 ? orderQty : ""}
             placeholder={isGrams ? "0.000" : "0"}
             onChange={(e) => {
@@ -1130,7 +748,7 @@ function OrderItemRow({
       </td>
 
       {/* Live calc preview */}
-      <td className="text-xs font-semibold text-primary whitespace-nowrap">
+      <td className="px-3 py-2 border-r border-border text-xs font-semibold text-primary whitespace-nowrap">
         {calc ? (
           <div className="flex flex-col gap-0.5">
             <span>{calc.finishedPieces} pcs</span>
@@ -1149,30 +767,30 @@ function OrderItemRow({
           <span className="text-muted-foreground">—</span>
         )}
       </td>
-      <td className="text-xs whitespace-nowrap">
+      <td className="px-3 py-2 border-r border-border text-xs whitespace-nowrap">
         {calc ? `${calc.waxTreesRequired} tr` : "—"}
       </td>
-      <td className="text-xs text-accent font-medium whitespace-nowrap">
+      <td className="px-3 py-2 border-r border-border text-xs text-accent font-medium whitespace-nowrap">
         {calc ? calc.totalStones.toLocaleString() : "—"}
       </td>
 
       {/* Item notes */}
-      <td className="w-32">
+      <td className="px-3 py-2 border-r border-border">
         <Input
-          className="h-7 text-xs"
+          className="h-8 text-xs"
           placeholder="Notes…"
           value={(getValues(`items.${index}.notes`) as string) || ""}
           onChange={(e) => setValue(`items.${index}.notes`, e.target.value)}
         />
       </td>
 
-      <td>
+      <td className="px-3 py-2 text-center">
         <button
           type="button"
           onClick={onRemove}
-          className="text-destructive hover:text-destructive/80 p-1"
+          className="text-destructive hover:text-destructive/80 p-1 hover:bg-destructive/10 rounded transition-colors"
         >
-          <X size={12} />
+          <X size={14} />
         </button>
       </td>
     </tr>
@@ -1184,6 +802,19 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
   const customers = useMemo(() => getCustomers().filter((c) => c.isActive), []);
   const patterns = useMemo(() => getPatterns(), []);
   const appSettings = useMemo(() => getAppSettings(), []);
+  const karigars = useMemo(() => getKarigars().filter((k) => k.isActive), []);
+  const waxKarigars = useMemo(() => karigars.filter((k) => k.type === "wax"), [karigars]);
+  const stoneKarigars = useMemo(() => karigars.filter((k) => k.type === "stone"), [karigars]);
+
+  const customerOptions: ComboboxOption[] = useMemo(() => 
+    customers.map((c) => ({ value: c.id, label: c.partyName })),
+    [customers]
+  );
+
+  const stoneKarigarOptions: ComboboxOption[] = useMemo(() => 
+    stoneKarigars.map((k) => ({ value: k.id, label: k.name })),
+    [stoneKarigars]
+  );
 
   const form = useForm<OrderFormValues>({
     resolver: zodResolver(orderSchema) as Resolver<OrderFormValues>,
@@ -1192,7 +823,10 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
       orderDate: new Date().toISOString().slice(0, 10),
       orderQuantityType: "pieces",
       notes: "",
+      touch: "",
       items: [],
+      waxKarigarId: "",
+      stoneKarigarId: "",
     },
   });
 
@@ -1201,9 +835,136 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
     name: "items",
   });
 
+  // Filter karigars based on selected patterns using dice ranges
+  const selectedPatternIds = useWatch({ control: form.control, name: "items" }) as any[];
+  const waxKarigarId = useWatch({ control: form.control, name: "waxKarigarId" });
+  
+  const filteredWaxKarigars = useMemo(() => {
+    if (!selectedPatternIds || selectedPatternIds.length === 0) return waxKarigars;
+    
+    // Get pattern numbers from selected patterns
+    const patternNumbers = selectedPatternIds
+      .filter((item) => item.patternId)
+      .map((item) => {
+        const pattern = patterns.find((p) => p.id === item.patternId);
+        return pattern?.patternNumber || "";
+      });
+
+    if (patternNumbers.length === 0) return waxKarigars;
+
+    // Find karigars assigned to these pattern numbers via dice ranges
+    const assignedKarigarIds = new Set<string>();
+    patternNumbers.forEach((patternNumber) => {
+      const range = findKarigarForPattern(patternNumber);
+      if (range) {
+        assignedKarigarIds.add(range.karigarId);
+      }
+    });
+
+    // If no dice ranges match, show all karigars
+    if (assignedKarigarIds.size === 0) return waxKarigars;
+
+    // Filter to only show assigned karigars
+    return waxKarigars.filter((k) => assignedKarigarIds.has(k.id));
+  }, [selectedPatternIds, waxKarigars, patterns]);
+
+  const waxKarigarOptions: ComboboxOption[] = useMemo(() => 
+    filteredWaxKarigars.map((k) => ({ value: k.id, label: k.name })),
+    [filteredWaxKarigars]
+  );
+
+  // Stone karigar should only be selectable if wax karigar is assigned (sequential workflow)
+  const canSelectStoneKarigar = useMemo(() => {
+    return !!waxKarigarId;
+  }, [waxKarigarId]);
+
   const onSubmit: SubmitHandler<OrderFormValues> = (values) => {
     try {
       const customer = customers.find((c) => c.id === values.customerId)!;
+
+      // Helper function to normalize size strings for comparison
+      const normalizeSize = (size: string) => {
+        if (!size) return '';
+        return size.toLowerCase()
+          .replace(/×/g, 'x')
+          .replace(/\*/g, 'x')
+          .replace(/\s*x\s*/g, 'x')
+          .replace(/\s+/g, '')
+          .trim();
+      };
+      
+      // Helper function to normalize shape strings for comparison
+      const normalizeShape = (shape: string) => {
+        if (!shape) return '';
+        return shape.toLowerCase().trim();
+      };
+
+      // Validate stone inventory before creating order
+      const microDiamonds = getMicroDiamonds();
+      const adDiamonds = getADDiamonds();
+      
+      for (const item of values.items) {
+        const pattern = patterns.find((p) => p.id === item.patternId);
+        if (!pattern) continue;
+
+        const calc: OrderItemCalculation =
+          (item.calculationCache as OrderItemCalculation | undefined) ??
+          (item.quantityType === "grams"
+            ? calculateGramOrder({
+                orderGrams: item.orderQuantity,
+                patternWeightGrams: pattern.weightPerPiece,
+                treeSize: pattern.treeSize,
+                stoneConfig: pattern.stoneConfig,
+                roundingMode: appSettings.roundingMode,
+              })
+            : calculatePieceOrder({
+                orderPieces: item.orderQuantity,
+                patternWeightGrams: pattern.weightPerPiece,
+                treeSize: pattern.treeSize,
+                stoneConfig: pattern.stoneConfig,
+                roundingMode: appSettings.roundingMode,
+              }));
+
+        // Check stone inventory
+        if (calc.stoneRequirements && calc.stoneRequirements.length > 0) {
+          for (const stoneReq of calc.stoneRequirements) {
+            const totalRequired = stoneReq.requiredQty;
+
+            if (stoneReq.stoneType === "micro") {
+              const normalizedReqSize = normalizeSize(stoneReq.stoneSize);
+              const micro = microDiamonds.find((m) => 
+                normalizeSize(m.size) === normalizedReqSize &&
+                m.isActive !== false
+              );
+              if (!micro || (micro.quantity || 0) < totalRequired) {
+                const available = micro?.quantity || 0;
+                toast.error(
+                  `Insufficient ${stoneReq.stoneSize}mm micro diamonds. Required: ${totalRequired}, Available: ${available}`
+                );
+                return;
+              }
+            } else if (stoneReq.stoneType === "ad") {
+              const normalizedReqSize = normalizeSize(stoneReq.stoneSize);
+              const normalizedReqShape = normalizeShape(stoneReq.shape);
+              
+              const ad = adDiamonds.find((a) => 
+                normalizeSize(a.size) === normalizedReqSize &&
+                normalizeShape(a.shape) === normalizedReqShape &&
+                a.isActive !== false &&
+                (a.quantity || 0) > 0
+              );
+              
+              if (!ad || (ad.quantity || 0) < totalRequired) {
+                const available = ad?.quantity || 0;
+                toast.error(
+                  `Insufficient ${stoneReq.shape} ${stoneReq.stoneSize} AD diamonds. Required: ${totalRequired}, Available: ${available}`
+                );
+                return;
+              }
+            }
+          }
+        }
+      }
 
       const items: OrderItem[] = values.items.map((item) => {
         const pattern = patterns.find((p) => p.id === item.patternId)!;
@@ -1252,6 +1013,92 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
       const allGrams = items.every((i) => i.quantityType === "grams");
       const allPieces = items.every((i) => i.quantityType === "pieces");
 
+      // Build karigar assignments from form values
+      const karigarAssignments: Order["karigarAssignments"] = [];
+      let initialStatus: OrderStatus = "pending";
+
+      if (values.waxKarigarId) {
+        const waxKarigar = karigars.find((k) => k.id === values.waxKarigarId);
+        if (waxKarigar) {
+          karigarAssignments.push({
+            type: "wax",
+            karigarId: waxKarigar.id,
+            karigarName: waxKarigar.name,
+            assignedAt: new Date().toISOString(),
+            notes: "Assigned during order creation",
+          });
+          initialStatus = "assigned";
+        }
+      }
+
+      if (values.stoneKarigarId) {
+        const stoneKarigar = karigars.find((k) => k.id === values.stoneKarigarId);
+        if (stoneKarigar) {
+          karigarAssignments.push({
+            type: "stone",
+            karigarId: stoneKarigar.id,
+            karigarName: stoneKarigar.name,
+            assignedAt: new Date().toISOString(),
+            notes: "Assigned during order creation",
+          });
+          initialStatus = karigarAssignments.length > 0 ? "assigned" : "pending";
+        }
+      }
+
+      // Track stone usage for this order
+      const stoneUsage: any[] = [];
+
+      // Deduct stone inventory after order creation and track usage
+      for (const item of items) {
+        if (item.calculation && item.calculation.stoneRequirements) {
+          for (const stoneReq of item.calculation.stoneRequirements) {
+            if (stoneReq.stoneType === "micro") {
+              const micro = microDiamonds.find((m) => 
+                normalizeSize(m.size) === normalizeSize(stoneReq.stoneSize) &&
+                m.isActive !== false
+              );
+              if (micro && (micro.quantity || 0) >= stoneReq.requiredQty) {
+                updateMicroDiamond(micro.id, { 
+                  quantity: (micro.quantity || 0) - stoneReq.requiredQty 
+                });
+                stoneUsage.push({
+                  stoneType: 'micro',
+                  stoneId: micro.id,
+                  stoneName: `${micro.size}mm`,
+                  quantityUsed: stoneReq.requiredQty,
+                  itemId: item.id,
+                });
+                console.log(`Deducted ${stoneReq.requiredQty} ${micro.size}mm micro diamonds from inventory`);
+              } else {
+                console.warn(`Insufficient ${stoneReq.stoneSize}mm micro diamonds. Required: ${stoneReq.requiredQty}, Available: ${micro?.quantity || 0}`);
+              }
+            } else if (stoneReq.stoneType === "ad") {
+              const ad = adDiamonds.find((a) => 
+                normalizeSize(a.size) === normalizeSize(stoneReq.stoneSize) &&
+                normalizeShape(a.shape) === normalizeShape(stoneReq.shape) &&
+                a.isActive !== false &&
+                (a.quantity || 0) > 0
+              );
+              if (ad && (ad.quantity || 0) >= stoneReq.requiredQty) {
+                updateADDiamond(ad.id, { 
+                  quantity: (ad.quantity || 0) - stoneReq.requiredQty 
+                });
+                stoneUsage.push({
+                  stoneType: 'ad',
+                  stoneId: ad.id,
+                  stoneName: `${ad.shape} ${ad.size}`,
+                  quantityUsed: stoneReq.requiredQty,
+                  itemId: item.id,
+                });
+                console.log(`Deducted ${stoneReq.requiredQty} ${ad.shape} ${ad.size} AD diamonds from inventory`);
+              } else {
+                console.warn(`Insufficient ${stoneReq.shape} ${stoneReq.stoneSize} AD diamonds. Required: ${stoneReq.requiredQty}, Available: ${ad?.quantity || 0}`);
+              }
+            }
+          }
+        }
+      }
+
       addOrder({
         customerId: customer.id,
         customerName: customer.partyName,
@@ -1262,19 +1109,23 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
           (values.orderQuantityType as "grams" | "pieces" | "mixed") ??
           (allGrams ? "grams" : allPieces ? "pieces" : "mixed"),
         items,
-        status: "pending",
+        status: initialStatus,
         statusHistory: [
           {
-            status: "pending",
+            status: initialStatus,
             changedAt: new Date().toISOString(),
             changedBy: "admin",
-            notes: "Order created",
+            notes: karigarAssignments.length > 0
+              ? `Order created with ${karigarAssignments.length} karigar assignment(s)`
+              : "Order created",
           },
         ],
-        karigarAssignments: [],
+        karigarAssignments,
         attachments: [],
         notes: values.notes || "",
+        touch: values.touch || "",
         orderDate: new Date(values.orderDate).toISOString(),
+        stoneUsage,
       });
 
       toast.success("Order created successfully");
@@ -1325,36 +1176,26 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
 
       <div className="page-panel-body">
         <Form {...form}>
-          <form className="max-w-5xl mx-auto flex flex-col gap-4">
-            {/* Order header */}
-            <div className="card-l1">
-              <div className="px-4 py-2.5 border-b border-border bg-muted/30">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Order Details
-                </span>
+          <form className="flex flex-col gap-6">
+            {/* Order Details Section */}
+            <div className="border border-border rounded-lg bg-card">
+              <div className="px-4 py-3 border-b border-border bg-muted/50">
+                <h3 className="text-sm font-semibold text-foreground">Order Details</h3>
               </div>
-              <div className="grid grid-cols-2 gap-4 px-4 py-3">
+              <div className="p-4 grid grid-cols-3 gap-4">
                 <FormField
                   control={form.control}
                   name="customerId"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-xs">Customer *</FormLabel>
-                      <Select
+                    <FormItem className="col-span-1">
+                      <FormLabel className="text-xs font-medium">Customer *</FormLabel>
+                      <Combobox
+                        options={customerOptions}
                         value={field.value}
-                        onValueChange={field.onChange}
-                      >
-                        <SelectTrigger className="h-8 text-sm">
-                          <SelectValue placeholder="Select customer" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {customers.map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              {c.partyName}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        onChange={field.onChange}
+                        placeholder="Select customer..."
+                        searchPlaceholder="Search customers..."
+                      />
                       <FormMessage />
                     </FormItem>
                   )}
@@ -1364,52 +1205,61 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
                   name="orderDate"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs">Order Date *</FormLabel>
+                      <FormLabel className="text-xs font-medium">Order Date *</FormLabel>
                       <FormControl>
-                        <Input {...field} type="date" className="h-8 text-sm" />
+                        <Input {...field} type="date" className="h-9 text-sm" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-              </div>
-              {/* Order Quantity Type — explicit 3-way radio beside Notes */}
-              <div className="px-4 pb-2 border-b border-border/50">
                 <FormField
                   control={form.control}
                   name="orderQuantityType"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs">
-                        Order Quantity Type *
-                      </FormLabel>
+                      <FormLabel className="text-xs font-medium">Order Quantity Type *</FormLabel>
                       <div className="mt-1">
                         <OrderQtyTypeRadio
                           value={field.value as "grams" | "pieces" | "mixed"}
                           onChange={field.onChange}
                         />
                       </div>
-                      <p className="text-[11px] text-muted-foreground mt-1">
-                        Does this customer give order in Grams, Pieces, or both?
-                      </p>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
               </div>
-              <div className="px-4 py-3">
+              <div className="px-4 pb-4 grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="touch"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs font-medium">Touch</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          placeholder="Enter touch value..."
+                          className="h-9 text-sm"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
                 <FormField
                   control={form.control}
                   name="notes"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs">Order Notes</FormLabel>
+                      <FormLabel className="text-xs font-medium">Order Notes</FormLabel>
                       <FormControl>
                         <Textarea
                           {...field}
                           placeholder="Special instructions, delivery info…"
                           rows={2}
-                          className="text-sm"
+                          className="text-sm resize-none"
                         />
                       </FormControl>
                     </FormItem>
@@ -1418,38 +1268,38 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
               </div>
             </div>
 
-            {/* Items */}
-            <div className="card-l1">
-              <div className="px-4 py-2.5 border-b border-border bg-muted/30 flex items-center gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground flex-1">
-                  Order Items
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {fields.length} item{fields.length !== 1 ? "s" : ""}
-                </span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-6 text-xs"
-                  onClick={() =>
-                    append({
-                      id: nanoid(),
-                      patternId: "",
-                      quantityType: "pieces",
-                      orderQuantity: 0,
-                      snapshot: null as unknown as OrderItem["snapshot"],
-                      notes: "",
-                    })
-                  }
-                >
-                  <Plus size={11} className="mr-1" />
-                  Add Item
-                </Button>
+            {/* Order Items Section - Excel-like Design */}
+            <div className="border border-border rounded-lg bg-card">
+              <div className="px-4 py-3 border-b border-border bg-muted/50 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-foreground">Order Items</h3>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-muted-foreground">
+                    {fields.length} item{fields.length !== 1 ? "s" : ""}
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="default"
+                    className="h-8 text-xs"
+                    onClick={() =>
+                      append({
+                        id: nanoid(),
+                        patternId: "",
+                        quantityType: "pieces",
+                        orderQuantity: 0,
+                        snapshot: null as unknown as OrderItem["snapshot"],
+                        notes: "",
+                      })
+                    }
+                  >
+                    <Plus size={12} className="mr-1" />
+                    Add Item
+                  </Button>
+                </div>
               </div>
 
               {/* Legend */}
-              <div className="px-4 pt-2 pb-1 flex items-center gap-4 text-[11px] text-muted-foreground">
+              <div className="px-4 py-2 bg-muted/30 border-b border-border flex items-center gap-4 text-[11px] text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-amber-500/15 text-amber-700 font-bold">
                     G
@@ -1467,35 +1317,28 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
               {form.formState.errors.items &&
                 typeof form.formState.errors.items === "object" &&
                 "message" in form.formState.errors.items && (
-                  <p className="text-xs text-destructive px-4 pt-1">
+                  <p className="text-xs text-destructive px-4 pt-2">
                     {form.formState.errors.items.message as string}
                   </p>
                 )}
 
               {fields.length === 0 ? (
-                <div className="p-8 text-center text-xs text-muted-foreground">
+                <div className="p-12 text-center text-sm text-muted-foreground">
                   Click "Add Item" to add patterns to this order
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="erp-table">
+                  <table className="w-full border-collapse">
                     <thead>
-                      <tr>
-                        <th>Pattern</th>
-                        <th>
-                          <span className="flex items-center gap-1">
-                            Type
-                            <span className="text-[9px] font-normal text-muted-foreground normal-case">
-                              (Grams / Pcs)
-                            </span>
-                          </span>
-                        </th>
-                        <th>Quantity</th>
-                        <th>Fin. Pcs / Wt</th>
-                        <th>Trees</th>
-                        <th>Stones</th>
-                        <th>Notes</th>
-                        <th></th>
+                      <tr className="bg-muted/50 border-b border-border">
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border">Pattern</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-32">Type</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-28">Quantity</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-28">Fin. Pcs / Wt</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-20">Trees</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-28">Stones</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-32">Notes</th>
+                        <th className="px-3 py-2 text-center text-xs font-semibold text-foreground w-10"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1514,6 +1357,58 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
                 </div>
               )}
             </div>
+
+            {/* Karigar Assignment Section */}
+            <div className="border border-border rounded-lg bg-card">
+              <div className="px-4 py-3 border-b border-border bg-muted/50">
+                <h3 className="text-sm font-semibold text-foreground">Karigar Assignment (Optional)</h3>
+              </div>
+              <div className="p-4 grid grid-cols-2 gap-6">
+                <FormField
+                  control={form.control}
+                  name="waxKarigarId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs font-medium">Wax Karigar</FormLabel>
+                      <Combobox
+                        options={waxKarigarOptions}
+                        value={field.value}
+                        onChange={field.onChange}
+                        placeholder="Select wax karigar..."
+                        emptyMessage="No wax karigars available"
+                        className="h-9"
+                      />
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        Assign wax karigar now to skip manual assignment
+                      </p>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="stoneKarigarId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs font-medium">Stone Karigar</FormLabel>
+                      <Combobox
+                        options={stoneKarigarOptions}
+                        value={field.value}
+                        onChange={field.onChange}
+                        placeholder={canSelectStoneKarigar ? "Select stone karigar..." : "Assign wax karigar first"}
+                        emptyMessage="No stone karigars available"
+                        className="h-9"
+                        disabled={!canSelectStoneKarigar}
+                      />
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        {!canSelectStoneKarigar 
+                          ? "Assign wax karigar first to enable stone assignment" 
+                          : "Assign stone karigar now to skip manual assignment"}
+                      </p>
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </div>
           </form>
         </Form>
       </div>
@@ -1521,19 +1416,18 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ── Main Orders Page ───────────────────────────────────────────────────────────
 export default function OrdersPage() {
-  const [orders, setOrders] = useState<Order[]>(getOrders);
+  const navigate = useNavigate();
+  const [view, setView] = useState<"list" | "new" | "party">("list");
+  const [selectedParty, setSelectedParty] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Order | null>(null);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [yearFilter, setYearFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [view, setView] = useState<ViewMode>("list");
-  const [selectedParty, setSelectedParty] = useState<string>("");
-  const [selectedOrder, setSelectedOrder] = useState<Order | undefined>();
-  const [deleteTarget, setDeleteTarget] = useState<Order | null>(null);
+  const [orders, setOrders] = useState<Order[]>(getOrders);
 
   const refresh = useCallback(() => setOrders(getOrders()), []);
 
@@ -1575,10 +1469,16 @@ export default function OrdersPage() {
 
   const handleDelete = () => {
     if (!deleteTarget) return;
-    deleteOrder(deleteTarget.id);
-    toast.success("Order deleted");
-    setDeleteTarget(null);
-    refresh();
+    if (!confirm(`Are you sure you want to delete order ${deleteTarget.orderNumber}? This cannot be undone.\n\nStones used in this order will be restored to inventory.`)) return;
+    try {
+      deleteOrder(deleteTarget.id);
+      toast.success("Order deleted and stones restored to inventory");
+      setDeleteTarget(null);
+      refresh();
+    } catch (error) {
+      toast.error("Failed to delete order");
+      console.error(error);
+    }
   };
 
   const handleStatusChange = (id: string, status: OrderStatus) => {
@@ -1607,25 +1507,10 @@ export default function OrdersPage() {
       <PartyOrdersPage
         partyName={selectedParty}
         orders={partyOrders}
-        onOrder={(o) => {
-          setSelectedOrder(o);
-          setView("order");
-        }}
         onBack={() => setView("list")}
         onStatusChange={handleStatusChange}
       />
     );
-  if (view === "order" && selectedOrder) {
-    const freshOrder =
-      orders.find((o) => o.id === selectedOrder.id) ?? selectedOrder;
-    return (
-      <OrderDetailPage
-        order={freshOrder}
-        onBack={() => setView(selectedParty ? "party" : "list")}
-        onStatusChange={handleStatusChange}
-      />
-    );
-  }
 
   return (
     <div className="flex flex-col h-full">

@@ -1,14 +1,15 @@
 {
-  "name": "miaoda-react-admin",
+  "name": "aaradhana-silver-erp",
   "version": "0.0.1",
   "type": "module",
-  "main": "electron/main.ts",
+  "main": "electron/dist/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "electron:dev": "concurrently \"pnpm dev\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "pnpm build && electron-builder",
-    "electron:build:win": "pnpm build && electron-builder --win",
+    "build:electron": "tsc -p electron/tsconfig.json && node -e \"require('fs').renameSync('electron/dist/main.js', 'electron/dist/main.cjs')\"",
+    "electron:dev": "concurrently \"pnpm dev\" \"wait-on http://localhost:5173 && pnpm build:electron && electron .\"",
+    "electron:build": "pnpm build && pnpm build:electron && electron-builder",
+    "electron:build:win": "pnpm build && pnpm build:electron && electron-builder --win",
     "lint": "tsgo -p tsconfig.check.json; npx biome lint; .rules/check.sh;npx tailwindcss -i ./src/index.css -o /dev/null 2>&1 | grep -E '^(CssSyntaxError|Error):.*' || true;.rules/testBuild.sh"
   },
   "dependencies": {

@@ -11,6 +11,8 @@ interface KPICardProps {
   trendValue?: string;
   iconColor?: string;
   iconBg?: string;
+  onClick?: () => void;
+  clickable?: boolean;
 }
 
 export function KPICard({
@@ -20,9 +22,17 @@ export function KPICard({
   icon: Icon,
   iconColor = "text-primary",
   iconBg = "bg-primary/10",
+  onClick,
+  clickable = false,
 }: KPICardProps) {
   return (
-    <div className="bg-card border border-border rounded-lg p-4 flex items-start gap-3">
+    <div 
+      className={cn(
+        "bg-card border border-border rounded-lg p-4 flex items-start gap-3",
+        clickable && "cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors"
+      )}
+      onClick={clickable ? onClick : undefined}
+    >
       <div
         className={cn(
           "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
