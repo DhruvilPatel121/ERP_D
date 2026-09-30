@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useRef } from "react";
+import React from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -202,15 +203,13 @@ function KarigarAssignPanel({
 }
 
 /* ── WhatsApp Image Card (hidden, rendered off-screen) ──────── */
-function OrderImageCard({
-  order,
-  ref: cardRef,
-  karigarType,
-}: {
-  order: Order;
-  ref: React.RefObject<HTMLDivElement>;
-  karigarType?: "wax" | "stone";
-}) {
+const OrderImageCard = React.forwardRef<
+  HTMLDivElement,
+  {
+    order: Order;
+    karigarType?: "wax" | "stone";
+  }
+>(({ order, karigarType }, cardRef) => {
   const appSettings = useMemo(() => getAppSettings(), []);
   const businessSettings = useMemo(() => getBusinessSettings(), []);
   const totalTrees = order.items.reduce(
@@ -232,12 +231,9 @@ function OrderImageCard({
     <div
       ref={cardRef}
       style={{
-        position: "fixed",
-        left: "-9999px",
-        top: 0,
-        width: "520px",
+        width: "600px",
         background: "#fff",
-        fontFamily: "Arial, sans-serif",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
         border: "2px solid #1E3A5F",
         borderRadius: "12px",
         overflow: "hidden",
@@ -257,7 +253,7 @@ function OrderImageCard({
         </div>
       </div>
 
-      {/* Order meta */}
+      {/* Order Info Section */}
       <div
         style={{
           background: "#f4f6f8",
@@ -270,6 +266,7 @@ function OrderImageCard({
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
+            marginBottom: 8,
           }}
         >
           <div>
@@ -295,72 +292,23 @@ function OrderImageCard({
             {ORDER_STATUS_LABELS[order.status]}
           </div>
         </div>
-      </div>
-
-      {/* Customer */}
-      <div
-        style={{
-          padding: "10px 20px",
-          borderBottom: "1px solid #e2e8f0",
-          fontSize: "13px",
-        }}
-      >
-        <span style={{ color: "#64748b" }}>Party/Customer: </span>
-        <strong style={{ color: "#1e293b" }}>{order.customerName}</strong>
-      </div>
-
-      {/* Touch */}
-      {order.touch && (
-        <div
-          style={{
-            padding: "10px 20px",
-            borderBottom: "1px solid #e2e8f0",
-            fontSize: "13px",
-          }}
-        >
-          <span style={{ color: "#64748b" }}>Touch: </span>
-          <strong style={{ color: "#1e293b" }}>{order.touch}</strong>
-        </div>
-      )}
-
-      {/* Key Info for Karigars */}
-      <div
-        style={{
-          padding: "12px 20px",
-          background: "#f8fafc",
-          borderBottom: "1px solid #e2e8f0",
-        }}
-      >
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: "8px",
-            fontSize: "12px",
-          }}
-        >
+        
+        {/* Customer and Touch Info */}
+        <div style={{ display: "flex", gap: "20px", fontSize: "13px" }}>
           <div>
-            <span style={{ color: "#64748b" }}>Order #: </span>
-            <strong style={{ color: "#1E3A5F" }}>{order.orderNumber}</strong>
+            <span style={{ color: "#64748b" }}>Party: </span>
+            <strong style={{ color: "#1e293b" }}>{order.customerName}</strong>
           </div>
-          <div>
-            <span style={{ color: "#64748b" }}>Total Pieces: </span>
-            <strong style={{ color: "#1E3A5F" }}>{totalPieces}</strong>
-          </div>
-          <div>
-            <span style={{ color: "#64748b" }}>Total Trees: </span>
-            <strong style={{ color: "#1E3A5F" }}>{totalTrees}</strong>
-          </div>
-          {!isWaxKarigar && (
+          {order.touch && (
             <div>
-              <span style={{ color: "#64748b" }}>Total Stones: </span>
-              <strong style={{ color: "#B8965A" }}>{formatNumber(totalStones)}</strong>
+              <span style={{ color: "#64748b" }}>Touch: </span>
+              <strong style={{ color: "#1e293b" }}>{order.touch}</strong>
             </div>
           )}
         </div>
       </div>
 
-      {/* Pattern Details */}
+      {/* Table Section */}
       <div style={{ padding: "12px 20px" }}>
         <div
           style={{
@@ -372,95 +320,138 @@ function OrderImageCard({
             marginBottom: 8,
           }}
         >
-          Pattern Details
+          Order Details
         </div>
-        {order.items.map((item, i) => (
-          <div
-            key={item.id}
-            style={{
-              background: i % 2 === 0 ? "#f8fafc" : "#fff",
-              borderRadius: 6,
-              padding: "8px 10px",
-              marginBottom: 4,
-              border: "1px solid #e2e8f0",
-            }}
-          >
-            <div
-              style={{
-                fontWeight: 600,
-                fontSize: "13px",
-                color: "#1e293b",
-                marginBottom: 4,
-              }}
-            >
-              {item.snapshot?.patternNumber} — {item.snapshot?.patternName}
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 4,
-                fontSize: "11px",
-                color: "#475569",
-              }}
-            >
-              <span>
-                Order Qty:{" "}
-                <b>
-                  {item.orderQuantity}
-                  {item.quantityType === "grams" ? "g" : " pcs"}
-                </b>
-              </span>
-              <span>
-                Finished Pcs:{" "}
-                <b style={{ color: "#1E3A5F" }}>
+        
+        {/* Main Table */}
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: "11px",
+            marginBottom: 12,
+          }}
+        >
+          <thead>
+            <tr style={{ background: "#1E3A5F", color: "#fff" }}>
+              <th style={{ padding: "8px", textAlign: "left", border: "1px solid #1E3A5F" }}>Pattern</th>
+              <th style={{ padding: "8px", textAlign: "center", border: "1px solid #1E3A5F" }}>Order Qty</th>
+              <th style={{ padding: "8px", textAlign: "center", border: "1px solid #1E3A5F" }}>Finished Pcs</th>
+              {isWaxKarigar && (
+                <>
+                  <th style={{ padding: "8px", textAlign: "center", border: "1px solid #1E3A5F" }}>Trees</th>
+                  <th style={{ padding: "8px", textAlign: "center", border: "1px solid #1E3A5F" }}>Tree Size</th>
+                </>
+              )}
+              {!isWaxKarigar && (
+                <th style={{ padding: "8px", textAlign: "center", border: "1px solid #1E3A5F" }}>Total Stones</th>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {order.items.map((item, i) => (
+              <tr key={item.id} style={{ background: i % 2 === 0 ? "#f8fafc" : "#fff" }}>
+                <td style={{ padding: "8px", border: "1px solid #e2e8f0", fontWeight: 600 }}>
+                  {item.snapshot?.patternNumber} — {item.snapshot?.patternName}
+                </td>
+                <td style={{ padding: "8px", border: "1px solid #e2e8f0", textAlign: "center" }}>
+                  {item.orderQuantity}{item.quantityType === "grams" ? "g" : " pcs"}
+                </td>
+                <td style={{ padding: "8px", border: "1px solid #e2e8f0", textAlign: "center", fontWeight: 600, color: "#1E3A5F" }}>
                   {item.calculation.finishedPieces}
-                </b>
-              </span>
-              <span>
-                Trees: <b>{item.calculation.waxTreesRequired}</b>
-              </span>
-              <span>
-                Tree Size: <b>{item.snapshot?.treeSize}</b>
-              </span>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Stone Details for Stone Karigars */}
-      {!isWaxKarigar && order.stoneUsage && order.stoneUsage.length > 0 && (
-        <div style={{ padding: "12px 20px", background: "#fff8dc", borderTop: "1px solid #e2e8f0" }}>
-          <div
-            style={{
-              fontSize: "11px",
-              fontWeight: 600,
-              color: "#64748b",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              marginBottom: 8,
-            }}
-          >
-            Stone Requirements
-          </div>
-          <div style={{ fontSize: "11px" }}>
-            {order.stoneUsage.map((usage, i) => (
-              <div
-                key={i}
-                style={{
-                  padding: "4px 0",
-                  borderBottom: i < order.stoneUsage!.length - 1 ? "1px solid #e2e8f0" : "none",
-                }}
-              >
-                <span style={{ color: "#64748b" }}>{usage.stoneType.toUpperCase()}: </span>
-                <strong style={{ color: "#1e293b" }}>{usage.stoneName}</strong>
-                <span style={{ color: "#64748b", marginLeft: 8 }}>Qty: </span>
-                <strong style={{ color: "#B8965A" }}>{usage.quantityUsed}</strong>
-              </div>
+                </td>
+                {isWaxKarigar && (
+                  <>
+                    <td style={{ padding: "8px", border: "1px solid #e2e8f0", textAlign: "center" }}>
+                      {item.calculation.waxTreesRequired}
+                    </td>
+                    <td style={{ padding: "8px", border: "1px solid #e2e8f0", textAlign: "center" }}>
+                      {item.snapshot?.treeSize}
+                    </td>
+                  </>
+                )}
+                {!isWaxKarigar && (
+                  <td style={{ padding: "8px", border: "1px solid #e2e8f0", textAlign: "center", fontWeight: 600, color: "#B8965A" }}>
+                    {formatNumber(item.calculation.totalStones)}
+                  </td>
+                )}
+              </tr>
             ))}
-          </div>
-        </div>
-      )}
+          </tbody>
+        </table>
+
+        {/* Stone Details Table for Stone Karigars */}
+        {!isWaxKarigar && order.stoneUsage && order.stoneUsage.length > 0 && (
+          <>
+            <div
+              style={{
+                fontSize: "11px",
+                fontWeight: 600,
+                color: "#64748b",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                marginBottom: 8,
+                marginTop: 12,
+              }}
+            >
+              Stone Requirements
+            </div>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: "11px",
+                background: "#fff8dc",
+              }}
+            >
+              <thead>
+                <tr style={{ background: "#B8965A", color: "#fff" }}>
+                  <th style={{ padding: "8px", textAlign: "left", border: "1px solid #B8965A" }}>Stone</th>
+                  <th style={{ padding: "8px", textAlign: "center", border: "1px solid #B8965A" }}>Size</th>
+                  <th style={{ padding: "8px", textAlign: "center", border: "1px solid #B8965A" }}>Qty/Piece</th>
+                  <th style={{ padding: "8px", textAlign: "center", border: "1px solid #B8965A" }}>Total Qty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {order.stoneUsage.map((usage, i) => (
+                  <tr key={i}>
+                    <td style={{ padding: "8px", border: "1px solid #e2e8f0" }}>
+                      <span style={{ 
+                        background: "#1E3A5F", 
+                        color: "#fff", 
+                        padding: "2px 6px", 
+                        borderRadius: "4px", 
+                        fontSize: "9px", 
+                        marginRight: "4px" 
+                      }}>
+                        {usage.stoneType === "micro" ? "M" : "AD"}
+                      </span>
+                      {usage.stoneName}
+                    </td>
+                    <td style={{ padding: "8px", border: "1px solid #e2e8f0", textAlign: "center" }}>
+                      {usage.stoneSize}
+                    </td>
+                    <td style={{ padding: "8px", border: "1px solid #e2e8f0", textAlign: "center" }}>
+                      {usage.quantityUsed}
+                    </td>
+                    <td style={{ padding: "8px", border: "1px solid #e2e8f0", textAlign: "center", fontWeight: 600, color: "#B8965A" }}>
+                      {usage.quantityUsed}
+                    </td>
+                  </tr>
+                ))}
+                <tr style={{ background: "#f8fafc", fontWeight: 600 }}>
+                  <td colSpan={3} style={{ padding: "8px", border: "1px solid #e2e8f0", textAlign: "right" }}>
+                    Total:
+                  </td>
+                  <td style={{ padding: "8px", border: "1px solid #e2e8f0", textAlign: "center", fontWeight: 600, color: "#B8965A" }}>
+                    {formatNumber(totalStones)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </>
+        )}
+      </div>
 
       {/* Summary */}
       <div
@@ -498,7 +489,7 @@ function OrderImageCard({
       </div>
     </div>
   );
-}
+});
 
 /* ── Main OrderDetailPage ────────────────────────────────────── */
 export default function OrderDetailPage() {
@@ -511,7 +502,7 @@ export default function OrderDetailPage() {
   const [statusNotes, setStatusNotes] = useState("");
   const [generatingImg, setGeneratingImg] = useState(false);
   const [karigarType, setKarigarType] = useState<"wax" | "stone">("wax");
-  const cardRef = useRef<HTMLDivElement>(null!);
+  const cardRef = useRef<HTMLDivElement>(null);
   const appSettings = useMemo(() => getAppSettings(), []);
 
   const refresh = useCallback(() => {
@@ -559,48 +550,372 @@ export default function OrderDetailPage() {
     refresh();
   };
 
-  const handleSendWaxWhatsApp = (item: (typeof order.items)[0]) => {
+  const handleSendWaxWhatsApp = async (item: (typeof order.items)[0]) => {
     const karigar = order.karigarAssignments.find((a) => a.type === "wax");
     const phone = karigar
       ? getKarigars().find((k) => k.id === karigar.karigarId)?.whatsapp || ""
       : "";
-    const msg = buildWaxMessage(appSettings.waxMessageTemplate, {
-      party: order.customerName,
-      pattern: item.snapshot?.patternNumber || "",
-      orderQuantity: `${item.orderQuantity}${item.quantityType === "grams" ? "g" : " pcs"}`,
-      finishedPieces: item.calculation.finishedPieces,
-      treeSize: item.snapshot?.treeSize || 0,
-      waxTrees: item.calculation.waxTreesRequired,
-      orderNumber: order.orderNumber,
-    });
-    window.open(
-      `https://wa.me/${phone.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`,
-      "_blank",
-    );
+
+    // Set karigar type to wax for image generation
+    setKarigarType("wax");
+
+    setGeneratingImg(true);
+    try {
+      toast.loading("Generating WhatsApp image...");
+
+      // Wait for the ref to be updated and DOM to be ready
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      if (!cardRef.current) {
+        throw new Error("Card element not found");
+      }
+      
+      // Make sure the card is visible for rendering
+      const cardParentForRender = cardRef.current.parentElement;
+      if (cardParentForRender) {
+        cardParentForRender.style.visibility = 'visible';
+        cardParentForRender.style.left = '-10000px';
+        cardParentForRender.style.top = '0';
+      }
+      
+      // Give it a moment to render
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Add timeout to prevent infinite loading
+      const canvas = await Promise.race([
+        html2canvas(cardRef.current, {
+          scale: 2, // Higher scale for better quality
+          useCORS: false, // Disable CORS to avoid external resource issues
+          backgroundColor: "#ffffff",
+          logging: false, // Disable logging to reduce console noise
+          allowTaint: true,
+          removeContainer: false, // Keep container for better rendering
+          foreignObjectRendering: false, // Disable for better compatibility
+          width: 600, // Explicit width matching the card
+          height: cardRef.current.offsetHeight || 600, // Dynamic height
+          x: 0, // Capture from left edge
+          y: 0, // Capture from top edge
+          windowWidth: 600, // Set window width for rendering
+          windowHeight: cardRef.current.offsetHeight || 600, // Set window height for rendering
+          scrollX: 0, // No horizontal scroll
+          scrollY: 0, // No vertical scroll
+          ignoreElements: (element) => {
+            // Ignore any external resources that might cause CSP issues
+            return element.tagName === 'LINK' && element.rel === 'stylesheet';
+          },
+        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Image generation timeout")), 15000)
+        )
+      ]) as HTMLCanvasElement;
+      
+      console.log("Canvas generated successfully, size:", canvas.width, "x", canvas.height);
+      
+      if (canvas.width === 0 || canvas.height === 0) {
+        throw new Error("Generated canvas has invalid dimensions");
+      }
+      
+      // Verify canvas has content by checking if it's not completely white
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const pixels = imageData.data;
+        let hasContent = false;
+        for (let i = 0; i < pixels.length; i += 4) {
+          // Check if pixel is not pure white (255, 255, 255)
+          if (pixels[i] !== 255 || pixels[i + 1] !== 255 || pixels[i + 2] !== 255) {
+            hasContent = true;
+            break;
+          }
+        }
+        if (!hasContent) {
+          console.warn("Canvas appears to be completely white - rendering issue detected");
+        }
+      }
+
+      // Hide the card again after rendering
+      if (cardParentForRender) {
+        cardParentForRender.style.visibility = 'hidden';
+      }
+
+      // Convert canvas to data URL (PNG for better clipboard compatibility)
+      const dataUrl = canvas.toDataURL("image/png", 0.9);
+
+      // Try to copy using Electron API
+      let copied = false;
+      if (window.electronAPI?.copyImageToClipboard) {
+        try {
+          console.log("Attempting Electron clipboard copy...");
+          const result = await window.electronAPI.copyImageToClipboard(dataUrl);
+          console.log("Electron clipboard result:", result);
+          
+          if (result.success) {
+            copied = true;
+            console.log("✓ Successfully copied using Electron clipboard");
+            toast.dismiss(); // Dismiss loading toast on success
+          } else {
+            console.warn("✗ Electron clipboard returned false:", result.error);
+            // Try browser fallback if Electron fails
+            throw new Error(result.error || "Electron clipboard failed");
+          }
+        } catch (e) {
+          console.warn("✗ Electron clipboard failed, trying browser fallback:", e);
+          // Fallback: try to copy to clipboard using browser API
+          try {
+            const response = await fetch(dataUrl);
+            const blob = await response.blob();
+            await navigator.clipboard.write([
+              new ClipboardItem({ 'image/png': blob })
+            ]);
+            copied = true;
+            console.log("✓ Successfully copied using browser clipboard API fallback");
+            toast.dismiss(); // Dismiss loading toast on success
+          } catch (browserError) {
+            console.warn("✗ Browser clipboard fallback also failed:", browserError);
+            toast.dismiss(); // Dismiss loading toast on fallback failure
+          }
+        }
+      } else {
+        console.log("Electron API not available, using browser clipboard fallback");
+        // Fallback: try to copy to clipboard using browser API
+        try {
+          const response = await fetch(dataUrl);
+          const blob = await response.blob();
+          await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blob })
+          ]);
+          copied = true;
+          console.log("✓ Successfully copied using browser clipboard API");
+          toast.dismiss(); // Dismiss loading toast on success
+        } catch (e) {
+          console.warn("✗ Browser clipboard fallback failed:", e);
+          toast.dismiss(); // Dismiss loading toast on fallback failure
+        }
+      }
+
+      const normalizedPhone = phone.replace(/\D/g, "");
+      const url = normalizedPhone
+        ? `https://web.whatsapp.com/send?phone=${normalizedPhone.startsWith("91") ? normalizedPhone : "91" + normalizedPhone}`
+        : "https://web.whatsapp.com";
+
+      // Use Electron API to open in default browser (Chrome)
+      setTimeout(async () => {
+        // Dismiss any existing toasts first
+        toast.dismiss();
+        
+        // Use Electron API to open in default browser
+        if (window.electronAPI?.openExternal) {
+          try {
+            await window.electronAPI.openExternal(url);
+          } catch (error) {
+            console.error('Failed to open external URL:', error);
+            // Fallback to window.open if Electron API fails
+            window.open(url, "_blank");
+          }
+        } else {
+          // Fallback to window.open if Electron API not available
+          window.open(url, "_blank");
+        }
+
+        if (copied) {
+          toast.success("WhatsApp Web is opening in your default browser. The work order image has been copied to your clipboard. 👉 Click inside the WhatsApp chat box and press CTRL + V (Paste) to send the image.");
+        } else {
+          toast.success("WhatsApp Web is opening in your default browser. Please attach the work order image manually.");
+        }
+      }, 300);
+    } catch (error) {
+      console.error("Image generation error:", error);
+      toast.dismiss(); // Dismiss loading toast
+      toast.error(`Failed to generate image: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setGeneratingImg(false);
+    }
   };
 
-  const handleSendStoneWhatsApp = (item: (typeof order.items)[0]) => {
+  const handleSendStoneWhatsApp = async (item: (typeof order.items)[0]) => {
     const karigar = order.karigarAssignments.find((a) => a.type === "stone");
     const phone = karigar
       ? getKarigars().find((k) => k.id === karigar.karigarId)?.whatsapp || ""
       : "";
-    const msg = buildStoneMessage(appSettings.stoneMessageTemplate, {
-      party: order.customerName,
-      pattern: item.snapshot?.patternNumber || "",
-      finishedPieces: item.calculation.finishedPieces,
-      stoneRequirements: item.calculation.stoneRequirements,
-      orderNumber: order.orderNumber,
-    });
-    window.open(
-      `https://wa.me/${phone.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`,
-      "_blank",
-    );
+
+    // Set karigar type to stone for image generation
+    setKarigarType("stone");
+
+    setGeneratingImg(true);
+    try {
+      toast.loading("Generating WhatsApp image...");
+
+      // Wait for the ref to be updated and DOM to be ready
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      if (!cardRef.current) {
+        throw new Error("Card element not found");
+      }
+      
+      // Make sure the card is visible for rendering
+      const cardParentForRender = cardRef.current.parentElement;
+      if (cardParentForRender) {
+        cardParentForRender.style.visibility = 'visible';
+        cardParentForRender.style.left = '-10000px';
+        cardParentForRender.style.top = '0';
+      }
+      
+      // Give it a moment to render
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Add timeout to prevent infinite loading
+      const canvas = await Promise.race([
+        html2canvas(cardRef.current, {
+          scale: 2, // Higher scale for better quality
+          useCORS: false, // Disable CORS to avoid external resource issues
+          backgroundColor: "#ffffff",
+          logging: false, // Disable logging to reduce console noise
+          allowTaint: true,
+          removeContainer: false, // Keep container for better rendering
+          foreignObjectRendering: false, // Disable for better compatibility
+          width: 600, // Explicit width matching the card
+          height: cardRef.current.offsetHeight || 600, // Dynamic height
+          x: 0, // Capture from left edge
+          y: 0, // Capture from top edge
+          windowWidth: 600, // Set window width for rendering
+          windowHeight: cardRef.current.offsetHeight || 600, // Set window height for rendering
+          scrollX: 0, // No horizontal scroll
+          scrollY: 0, // No vertical scroll
+          ignoreElements: (element) => {
+            // Ignore any external resources that might cause CSP issues
+            return element.tagName === 'LINK' && element.rel === 'stylesheet';
+          },
+        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Image generation timeout")), 15000)
+        )
+      ]) as HTMLCanvasElement;
+      
+      console.log("Canvas generated successfully, size:", canvas.width, "x", canvas.height);
+      
+      if (canvas.width === 0 || canvas.height === 0) {
+        throw new Error("Generated canvas has invalid dimensions");
+      }
+      
+      // Verify canvas has content by checking if it's not completely white
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const pixels = imageData.data;
+        let hasContent = false;
+        for (let i = 0; i < pixels.length; i += 4) {
+          // Check if pixel is not pure white (255, 255, 255)
+          if (pixels[i] !== 255 || pixels[i + 1] !== 255 || pixels[i + 2] !== 255) {
+            hasContent = true;
+            break;
+          }
+        }
+        if (!hasContent) {
+          console.warn("Canvas appears to be completely white - rendering issue detected");
+        }
+      }
+
+      // Hide the card again after rendering
+      if (cardParentForRender) {
+        cardParentForRender.style.visibility = 'hidden';
+      }
+
+      // Convert canvas to data URL (PNG for better clipboard compatibility)
+      const dataUrl = canvas.toDataURL("image/png", 0.9);
+
+      // Try to copy using Electron API
+      let copied = false;
+      if (window.electronAPI?.copyImageToClipboard) {
+        try {
+          console.log("Attempting Electron clipboard copy...");
+          const result = await window.electronAPI.copyImageToClipboard(dataUrl);
+          console.log("Electron clipboard result:", result);
+          
+          if (result.success) {
+            copied = true;
+            console.log("✓ Successfully copied using Electron clipboard");
+            toast.dismiss(); // Dismiss loading toast on success
+          } else {
+            console.warn("✗ Electron clipboard returned false:", result.error);
+            // Try browser fallback if Electron fails
+            throw new Error(result.error || "Electron clipboard failed");
+          }
+        } catch (e) {
+          console.warn("✗ Electron clipboard failed, trying browser fallback:", e);
+          // Fallback: try to copy to clipboard using browser API
+          try {
+            const response = await fetch(dataUrl);
+            const blob = await response.blob();
+            await navigator.clipboard.write([
+              new ClipboardItem({ 'image/png': blob })
+            ]);
+            copied = true;
+            console.log("✓ Successfully copied using browser clipboard API fallback");
+            toast.dismiss(); // Dismiss loading toast on success
+          } catch (browserError) {
+            console.warn("✗ Browser clipboard fallback also failed:", browserError);
+            toast.dismiss(); // Dismiss loading toast on fallback failure
+          }
+        }
+      } else {
+        console.log("Electron API not available, using browser clipboard fallback");
+        // Fallback: try to copy to clipboard using browser API
+        try {
+          const response = await fetch(dataUrl);
+          const blob = await response.blob();
+          await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blob })
+          ]);
+          copied = true;
+          console.log("✓ Successfully copied using browser clipboard API");
+          toast.dismiss(); // Dismiss loading toast on success
+        } catch (e) {
+          console.warn("✗ Browser clipboard fallback failed:", e);
+          toast.dismiss(); // Dismiss loading toast on fallback failure
+        }
+      }
+
+      const normalizedPhone = phone.replace(/\D/g, "");
+      const url = normalizedPhone
+        ? `https://web.whatsapp.com/send?phone=${normalizedPhone.startsWith("91") ? normalizedPhone : "91" + normalizedPhone}`
+        : "https://web.whatsapp.com";
+
+      // Use Electron API to open in default browser (Chrome)
+      setTimeout(async () => {
+        // Dismiss any existing toasts first
+        toast.dismiss();
+        
+        // Use Electron API to open in default browser
+        if (window.electronAPI?.openExternal) {
+          try {
+            await window.electronAPI.openExternal(url);
+          } catch (error) {
+            console.error('Failed to open external URL:', error);
+            // Fallback to window.open if Electron API fails
+            window.open(url, "_blank");
+          }
+        } else {
+          // Fallback to window.open if Electron API not available
+          window.open(url, "_blank");
+        }
+
+        if (copied) {
+          toast.success("WhatsApp Web is opening in your default browser. The work order image has been copied to your clipboard. 👉 Click inside the WhatsApp chat box and press CTRL + V (Paste) to send the image.");
+        } else {
+          toast.success("WhatsApp Web is opening in your default browser. Please attach the work order image manually.");
+        }
+      }, 300);
+    } catch (error) {
+      console.error("Image generation error:", error);
+      toast.dismiss(); // Dismiss loading toast
+      toast.error(`Failed to generate image: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setGeneratingImg(false);
+    }
   };
 
   /* ── WhatsApp Image Share ─────────────────────────────────── */
   const handleWhatsAppImageShare = async (type?: "wax" | "stone") => {
-    if (!cardRef.current) return;
-    
     // Determine karigar type based on parameter or auto-detect
     let targetType: "wax" | "stone" = "wax";
     if (type) {
@@ -613,41 +928,181 @@ export default function OrderDetailPage() {
       targetType = hasStoneAssignment ? "stone" : "wax";
       setKarigarType(targetType);
     }
-    
+
     setGeneratingImg(true);
     try {
       toast.loading("Generating WhatsApp image...");
+
+      // Wait for the ref to be updated and DOM to be ready
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      if (!cardRef.current) {
+        throw new Error("Card element not found");
+      }
       
-      const canvas = await html2canvas(cardRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        logging: false,
-      });
+      // Make sure the card is visible for rendering
+      const cardParentForRender = cardRef.current.parentElement;
+      if (cardParentForRender) {
+        cardParentForRender.style.visibility = 'visible';
+        cardParentForRender.style.left = '-10000px';
+        cardParentForRender.style.top = '0';
+      }
       
-      // Download JPG
-      const link = document.createElement("a");
-      link.download = `${order.orderNumber}_${targetType}_karigar.jpg`;
-      link.href = canvas.toDataURL("image/jpeg", 0.95);
-      link.click();
+      // Give it a moment to render
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Add timeout to prevent infinite loading
+      const canvas = await Promise.race([
+        html2canvas(cardRef.current, {
+          scale: 2, // Higher scale for better quality
+          useCORS: false, // Disable CORS to avoid external resource issues
+          backgroundColor: "#ffffff",
+          logging: false, // Disable logging to reduce console noise
+          allowTaint: true,
+          removeContainer: false, // Keep container for better rendering
+          foreignObjectRendering: false, // Disable for better compatibility
+          width: 600, // Explicit width matching the card
+          height: cardRef.current.offsetHeight || 600, // Dynamic height
+          x: 0, // Capture from left edge
+          y: 0, // Capture from top edge
+          windowWidth: 600, // Set window width for rendering
+          windowHeight: cardRef.current.offsetHeight || 600, // Set window height for rendering
+          scrollX: 0, // No horizontal scroll
+          scrollY: 0, // No vertical scroll
+          ignoreElements: (element) => {
+            // Ignore any external resources that might cause CSP issues
+            return element.tagName === 'LINK' && element.rel === 'stylesheet';
+          },
+        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Image generation timeout")), 15000)
+        )
+      ]) as HTMLCanvasElement;
       
+      console.log("Canvas generated successfully, size:", canvas.width, "x", canvas.height);
+      
+      if (canvas.width === 0 || canvas.height === 0) {
+        throw new Error("Generated canvas has invalid dimensions");
+      }
+      
+      // Verify canvas has content by checking if it's not completely white
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const pixels = imageData.data;
+        let hasContent = false;
+        for (let i = 0; i < pixels.length; i += 4) {
+          // Check if pixel is not pure white (255, 255, 255)
+          if (pixels[i] !== 255 || pixels[i + 1] !== 255 || pixels[i + 2] !== 255) {
+            hasContent = true;
+            break;
+          }
+        }
+        if (!hasContent) {
+          console.warn("Canvas appears to be completely white - rendering issue detected");
+        }
+      }
+
+      // Hide the card again after rendering
+      if (cardParentForRender) {
+        cardParentForRender.style.visibility = 'hidden';
+      }
+
+      // Convert canvas to data URL (PNG for better clipboard compatibility)
+      const dataUrl = canvas.toDataURL("image/png", 0.9);
+
+      // Try to copy using Electron API
+      let copied = false;
+      if (window.electronAPI?.copyImageToClipboard) {
+        try {
+          console.log("Attempting Electron clipboard copy...");
+          const result = await window.electronAPI.copyImageToClipboard(dataUrl);
+          console.log("Electron clipboard result:", result);
+          
+          if (result.success) {
+            copied = true;
+            console.log("✓ Successfully copied using Electron clipboard");
+            toast.dismiss(); // Dismiss loading toast on success
+          } else {
+            console.warn("✗ Electron clipboard returned false:", result.error);
+            // Try browser fallback if Electron fails
+            throw new Error(result.error || "Electron clipboard failed");
+          }
+        } catch (e) {
+          console.warn("✗ Electron clipboard failed, trying browser fallback:", e);
+          // Fallback: try to copy to clipboard using browser API
+          try {
+            const response = await fetch(dataUrl);
+            const blob = await response.blob();
+            await navigator.clipboard.write([
+              new ClipboardItem({ 'image/png': blob })
+            ]);
+            copied = true;
+            console.log("✓ Successfully copied using browser clipboard API fallback");
+            toast.dismiss(); // Dismiss loading toast on success
+          } catch (browserError) {
+            console.warn("✗ Browser clipboard fallback also failed:", browserError);
+            toast.dismiss(); // Dismiss loading toast on fallback failure
+          }
+        }
+      } else {
+        console.log("Electron API not available, using browser clipboard fallback");
+        // Fallback: try to copy to clipboard using browser API
+        try {
+          const response = await fetch(dataUrl);
+          const blob = await response.blob();
+          await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blob })
+          ]);
+          copied = true;
+          console.log("✓ Successfully copied using browser clipboard API");
+          toast.dismiss(); // Dismiss loading toast on success
+        } catch (e) {
+          console.warn("✗ Browser clipboard fallback failed:", e);
+          toast.dismiss(); // Dismiss loading toast on fallback failure
+        }
+      }
+
       // Get appropriate karigar phone number
       const assignment = order.karigarAssignments.find(a => a.type === targetType);
-      const karigar = assignment 
+      const karigar = assignment
         ? getKarigars().find(k => k.id === assignment.karigarId)
         : null;
       const phone = karigar?.whatsapp || karigar?.mobile || order.customerWhatsapp?.replace(/\D/g, "") || "";
-      
-      // Open WhatsApp with kar number
-      setTimeout(() => {
+
+      // Open WhatsApp Web with the correct number
+      setTimeout(async () => {
+        // Dismiss any existing toasts first
+        toast.dismiss();
+        
         const url = phone
-          ? `https://wa.me/${phone.startsWith("91") ? phone : "91" + phone}`
+          ? `https://web.whatsapp.com/send?phone=${phone.startsWith("91") ? phone : "91" + phone}`
           : "https://web.whatsapp.com";
-        window.open(url, "_blank");
-        toast.success("Image downloaded! Attach it in WhatsApp chat.");
-      }, 500);
-    } catch {
-      toast.error("Image generation failed");
+
+        // Use Electron API to open in default browser
+        if (window.electronAPI?.openExternal) {
+          try {
+            await window.electronAPI.openExternal(url);
+          } catch (error) {
+            console.error('Failed to open external URL:', error);
+            // Fallback to window.open if Electron API fails
+            window.open(url, "_blank");
+          }
+        } else {
+          // Fallback to window.open if Electron API not available
+          window.open(url, "_blank");
+        }
+
+        if (copied) {
+          toast.success("WhatsApp Web is opening in your default browser. The work order image has been copied to your clipboard. 👉 Click inside the WhatsApp chat box and press CTRL + V (Paste) to send the image.");
+        } else {
+          toast.success("WhatsApp Web is opening in your default browser. Please attach the work order image manually.");
+        }
+      }, 300);
+    } catch (error) {
+      console.error("Image generation error:", error);
+      toast.dismiss(); // Dismiss loading toast
+      toast.error(`Failed to generate image: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setGeneratingImg(false);
     }
@@ -720,7 +1175,9 @@ export default function OrderDetailPage() {
       />
 
       {/* Hidden image card (rendered off-screen for html2canvas) */}
-      <OrderImageCard order={order} ref={cardRef} karigarType={karigarType} />
+      <div style={{ position: "fixed", left: -10000, top: 0, zIndex: -1, pointerEvents: "none", width: "600px" }}>
+        <OrderImageCard order={order} ref={cardRef} karigarType={karigarType} />
+      </div>
 
       {/* Main layout — 2-column */}
       <div className="erp-content">
@@ -884,16 +1341,18 @@ export default function OrderDetailPage() {
                           variant="outline"
                           className="h-6 text-[10px] px-1.5"
                           onClick={() => handleSendWaxWhatsApp(item)}
+                          disabled={generatingImg}
                         >
-                          <Hammer size={9} className="mr-1" /> Wax WA
+                          <Hammer size={9} className="mr-1" /> {generatingImg ? "Generating…" : "Wax WA"}
                         </Button>
                         <Button
                           size="sm"
                           variant="outline"
                           className="h-6 text-[10px] px-1.5"
                           onClick={() => handleSendStoneWhatsApp(item)}
+                          disabled={generatingImg}
                         >
-                          <Gem size={9} className="mr-1" /> Stone WA
+                          <Gem size={9} className="mr-1" /> {generatingImg ? "Generating…" : "Stone WA"}
                         </Button>
                       </div>
                     </div>

@@ -2,7 +2,7 @@
   "appId": "com.aaradhana.silver.erp",
   "productName": "Aaradhana Silver ERP",
   "directories": {
-    "output": "release"
+    "output": "build-output"
   },
   "files": [
     "dist/**/*",
@@ -13,17 +13,11 @@
   "win": {
     "target": [
       {
-        "target": "nsis",
+        "target": "portable",
         "arch": ["x64"]
       }
     ],
     "icon": "public/favicon.png"
-  },
-  "nsis": {
-    "oneClick": false,
-    "allowToChangeInstallationDirectory": true,
-    "createDesktopShortcut": true,
-    "createStartMenuShortcut": true
   },
   "asar": false
 }

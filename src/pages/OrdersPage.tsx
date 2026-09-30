@@ -40,6 +40,8 @@ import {
   getADDiamonds,
   updateMicroDiamond,
   updateADDiamond,
+  saveMicroDiamonds,
+  saveADDiamonds,
 } from "@/lib/db";
 import { calculateGramOrder, calculatePieceOrder } from "@/lib/calculations";
 import { formatDate, nanoid } from "@/lib/utils";
@@ -947,15 +949,28 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
               const normalizedReqSize = normalizeSize(stoneReq.stoneSize);
               const normalizedReqShape = normalizeShape(stoneReq.shape);
               
-              const ad = adDiamonds.find((a) => 
+              // Try multiple matching strategies for validation
+              let foundAd = null;
+              
+              // Strategy 1: Exact match on size and shape
+              foundAd = adDiamonds.find((a) => 
                 normalizeSize(a.size) === normalizedReqSize &&
                 normalizeShape(a.shape) === normalizedReqShape &&
                 a.isActive !== false &&
                 (a.quantity || 0) > 0
               );
               
-              if (!ad || (ad.quantity || 0) < totalRequired) {
-                const available = ad?.quantity || 0;
+              // Strategy 2: Try matching by size only if exact match fails
+              if (!foundAd) {
+                foundAd = adDiamonds.find((a) => 
+                  normalizeSize(a.size) === normalizedReqSize &&
+                  a.isActive !== false &&
+                  (a.quantity || 0) > 0
+                );
+              }
+              
+              if (!foundAd || (foundAd.quantity || 0) < totalRequired) {
+                const available = foundAd?.quantity || 0;
                 toast.error(
                   `Insufficient ${stoneReq.shape} ${stoneReq.stoneSize} AD diamonds. Required: ${totalRequired}, Available: ${available}`
                 );
@@ -1058,9 +1073,18 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
                 m.isActive !== false
               );
               if (micro && (micro.quantity || 0) >= stoneReq.requiredQty) {
-                updateMicroDiamond(micro.id, { 
-                  quantity: (micro.quantity || 0) - stoneReq.requiredQty 
-                });
+                // Direct update to avoid triggering totalQuantity increase logic
+                const stones = getMicroDiamonds();
+                const idx = stones.findIndex((s) => s.id === micro.id);
+                if (idx >= 0) {
+                  stones[idx] = { 
+                    ...stones[idx], 
+                    quantity: (micro.quantity || 0) - stoneReq.requiredQty,
+                    updatedAt: new Date().toISOString()
+                  };
+                  saveMicroDiamonds(stones);
+                }
+                
                 stoneUsage.push({
                   stoneType: 'micro',
                   stoneId: micro.id,
@@ -1068,31 +1092,54 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
                   quantityUsed: stoneReq.requiredQty,
                   itemId: item.id,
                 });
-                console.log(`Deducted ${stoneReq.requiredQty} ${micro.size}mm micro diamonds from inventory`);
+                console.log(`Deducted ${stoneReq.requiredQty} ${micro.size}mm micro diamonds from inventory (remaining: ${(micro.quantity || 0) - stoneReq.requiredQty})`);
               } else {
                 console.warn(`Insufficient ${stoneReq.stoneSize}mm micro diamonds. Required: ${stoneReq.requiredQty}, Available: ${micro?.quantity || 0}`);
               }
             } else if (stoneReq.stoneType === "ad") {
-              const ad = adDiamonds.find((a) => 
+              // Try multiple matching strategies for AD diamonds
+              let foundAd = null;
+              
+              // Strategy 1: Exact match on size and shape
+              foundAd = adDiamonds.find((a) => 
                 normalizeSize(a.size) === normalizeSize(stoneReq.stoneSize) &&
                 normalizeShape(a.shape) === normalizeShape(stoneReq.shape) &&
                 a.isActive !== false &&
                 (a.quantity || 0) > 0
               );
-              if (ad && (ad.quantity || 0) >= stoneReq.requiredQty) {
-                updateADDiamond(ad.id, { 
-                  quantity: (ad.quantity || 0) - stoneReq.requiredQty 
-                });
+              
+              // Strategy 2: Try matching by size only if exact match fails
+              if (!foundAd) {
+                foundAd = adDiamonds.find((a) => 
+                  normalizeSize(a.size) === normalizeSize(stoneReq.stoneSize) &&
+                  a.isActive !== false &&
+                  (a.quantity || 0) > 0
+                );
+              }
+              
+              if (foundAd && (foundAd.quantity || 0) >= stoneReq.requiredQty) {
+                // Direct update to avoid triggering totalQuantity increase logic
+                const stones = getADDiamonds();
+                const idx = stones.findIndex((s) => s.id === foundAd.id);
+                if (idx >= 0) {
+                  stones[idx] = { 
+                    ...stones[idx], 
+                    quantity: (foundAd.quantity || 0) - stoneReq.requiredQty,
+                    updatedAt: new Date().toISOString()
+                  };
+                  saveADDiamonds(stones);
+                }
+                
                 stoneUsage.push({
                   stoneType: 'ad',
-                  stoneId: ad.id,
-                  stoneName: `${ad.shape} ${ad.size}`,
+                  stoneId: foundAd.id,
+                  stoneName: `${foundAd.shape} ${foundAd.size}`,
                   quantityUsed: stoneReq.requiredQty,
                   itemId: item.id,
                 });
-                console.log(`Deducted ${stoneReq.requiredQty} ${ad.shape} ${ad.size} AD diamonds from inventory`);
+                console.log(`Deducted ${stoneReq.requiredQty} ${foundAd.shape} ${foundAd.size} AD diamonds from inventory (remaining: ${(foundAd.quantity || 0) - stoneReq.requiredQty})`);
               } else {
-                console.warn(`Insufficient ${stoneReq.shape} ${stoneReq.stoneSize} AD diamonds. Required: ${stoneReq.requiredQty}, Available: ${ad?.quantity || 0}`);
+                console.warn(`Insufficient ${stoneReq.shape} ${stoneReq.stoneSize} AD diamonds. Required: ${stoneReq.requiredQty}, Available: ${foundAd?.quantity || 0}`);
               }
             }
           }

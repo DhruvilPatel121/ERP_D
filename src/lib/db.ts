@@ -732,24 +732,50 @@ export function deleteOrder(id: ID): void {
           console.warn(`Could not find micro diamond for ${usage.stoneName} to restore`);
         }
       } else if (usage.stoneType === 'ad') {
-        // AD diamond stone name format: "Oval 3x2mm"
-        const stoneNameParts = usage.stoneName.split(' ');
-        const shape = stoneNameParts[0] || '';
-        const size = stoneNameParts.slice(1).join(' ').replace('mm', '').trim();
+        // AD diamond stone name format: "Oval 3x2mm" or "Round 1.30mm"
+        // Try multiple parsing strategies to handle different formats
+        let foundAd = null;
         
-        const ad = adDiamonds.find((a) => 
-          normalizeSize(a.size) === normalizeSize(size) &&
-          normalizeShape(a.shape) === normalizeShape(shape) &&
-          a.isActive !== false
-        );
-        if (ad) {
+        // Strategy 1: Split by space - first word is shape, rest is size
+        const stoneNameParts = usage.stoneName.split(' ');
+        if (stoneNameParts.length >= 2) {
+          const shape = stoneNameParts[0] || '';
+          const size = stoneNameParts.slice(1).join(' ').replace('mm', '').trim();
+          
+          foundAd = adDiamonds.find((a) => 
+            normalizeSize(a.size) === normalizeSize(size) &&
+            normalizeShape(a.shape) === normalizeShape(shape) &&
+            a.isActive !== false
+          );
+        }
+        
+        // Strategy 2: If not found, try alternative parsing
+        if (!foundAd) {
+          // Try matching by stoneId directly if available
+          foundAd = adDiamonds.find((a) => 
+            a.id === usage.stoneId && a.isActive !== false
+          );
+        }
+        
+        // Strategy 3: Try fuzzy matching on size
+        if (!foundAd) {
+          const sizePart = usage.stoneName.replace(/[a-zA-Z]/g, '').replace('mm', '').trim();
+          if (sizePart) {
+            foundAd = adDiamonds.find((a) => 
+              normalizeSize(a.size) === normalizeSize(sizePart) &&
+              a.isActive !== false
+            );
+          }
+        }
+        
+        if (foundAd) {
           // Restore quantity but cap it at the original totalQuantity
-          const originalTotal = ad.totalQuantity || ad.quantity || 0;
-          const newQuantity = Math.min((ad.quantity || 0) + usage.quantityUsed, originalTotal);
+          const originalTotal = foundAd.totalQuantity || foundAd.quantity || 0;
+          const newQuantity = Math.min((foundAd.quantity || 0) + usage.quantityUsed, originalTotal);
           
           // Direct update to avoid triggering totalQuantity increase logic
           const stones = getADDiamonds();
-          const idx = stones.findIndex((s) => s.id === ad.id);
+          const idx = stones.findIndex((s) => s.id === foundAd.id);
           if (idx >= 0) {
             stones[idx] = { 
               ...stones[idx], 
@@ -759,9 +785,9 @@ export function deleteOrder(id: ID): void {
             saveADDiamonds(stones);
           }
           
-          console.log(`Restored ${usage.quantityUsed} ${usage.stoneName} to inventory (new qty: ${newQuantity}, total: ${originalTotal})`);
+          console.log(`Restored ${usage.quantityUsed} ${usage.stoneName} (${foundAd.shape} ${foundAd.size}) to inventory (new qty: ${newQuantity}, total: ${originalTotal})`);
         } else {
-          console.warn(`Could not find AD diamond for ${usage.stoneName} to restore`);
+          console.warn(`Could not find AD diamond for ${usage.stoneName} to restore. Tried multiple matching strategies.`);
         }
       }
     });

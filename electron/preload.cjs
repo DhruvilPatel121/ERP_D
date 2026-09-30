@@ -1,12 +1,16 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  // Database operations
-  dbQuery: (sql, params) => ipcRenderer.invoke('db-query', sql, params),
-  dbRun: (sql, params) => ipcRenderer.invoke('db-run', sql, params),
-  dbGet: (sql, params) => ipcRenderer.invoke('db-get', sql, params),
-  
   // App info
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getAppPath: () => ipcRenderer.invoke('get-app-path'),
+
+  // Open external URLs in default browser
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+
+  // Copy image to clipboard using Electron's native clipboard
+  copyImageToClipboard: (dataUrl) => ipcRenderer.invoke('copy-image-to-clipboard', dataUrl),
+  
+  // Check if we're running in Electron
+  isElectron: true,
 });

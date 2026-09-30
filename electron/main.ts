@@ -1,139 +1,8 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, clipboard, nativeImage } = require('electron');
 const path = require('path');
-const Database = require('better-sqlite3');
+const fs = require('fs');
 
 let mainWindow = null;
-let db = null;
-
-// Database initialization
-function initDatabase() {
-  const userDataPath = app.getPath('userData');
-  const dbPath = path.join(userDataPath, 'erp_database.db');
-  
-  db = new Database(dbPath);
-  db.pragma('journal_mode = WAL');
-  
-  // Create tables if they don't exist
-  createTables();
-  
-  console.log('Database initialized at:', dbPath);
-  return db;
-}
-
-function createTables() {
-  if (!db) return;
-  
-  // Example tables - customize based on your ERP needs
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      email TEXT UNIQUE,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    
-    CREATE TABLE IF NOT EXISTS products (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      price REAL NOT NULL,
-      stock INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    
-    CREATE TABLE IF NOT EXISTS orders (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      customer_name TEXT NOT NULL,
-      total REAL NOT NULL,
-      status TEXT DEFAULT 'pending',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    
-    CREATE TABLE IF NOT EXISTS customers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      party_name TEXT NOT NULL UNIQUE,
-      phone TEXT,
-      address TEXT,
-      email TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    
-    CREATE TABLE IF NOT EXISTS diamond_types (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    
-    CREATE TABLE IF NOT EXISTS micro_diamonds (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      size TEXT NOT NULL,
-      quantity INTEGER DEFAULT 0,
-      weight REAL DEFAULT 0,
-      price_per_1000 REAL DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(size)
-    );
-    
-    CREATE TABLE IF NOT EXISTS ad_shapes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      shape TEXT NOT NULL UNIQUE,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    
-    CREATE TABLE IF NOT EXISTS ad_diamonds (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      shape_id INTEGER NOT NULL,
-      size TEXT NOT NULL,
-      quantity INTEGER DEFAULT 0,
-      weight REAL DEFAULT 0,
-      price_per_piece REAL DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (shape_id) REFERENCES ad_shapes(id),
-      UNIQUE(shape_id, size)
-    );
-    
-    CREATE TABLE IF NOT EXISTS order_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      order_id INTEGER NOT NULL,
-      diamond_type TEXT NOT NULL,
-      diamond_id INTEGER NOT NULL,
-      quantity_used INTEGER DEFAULT 0,
-      weight_used REAL DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (order_id) REFERENCES orders(id)
-    );
-    
-    CREATE TABLE IF NOT EXISTS inventory_log (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      diamond_type TEXT NOT NULL,
-      diamond_id INTEGER NOT NULL,
-      order_id INTEGER,
-      quantity_change INTEGER DEFAULT 0,
-      weight_change REAL DEFAULT 0,
-      remaining_quantity INTEGER DEFAULT 0,
-      remaining_weight REAL DEFAULT 0,
-      action TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-  
-  // Insert default diamond types
-  const typeCount = db.prepare('SELECT COUNT(*) as count FROM diamond_types').get() as { count: number };
-  if (typeCount.count === 0) {
-    db.prepare('INSERT INTO diamond_types (name) VALUES (?)').run('Micro');
-    db.prepare('INSERT INTO diamond_types (name) VALUES (?)').run('AD');
-  }
-  
-  // Insert default AD shapes
-  const shapeCount = db.prepare('SELECT COUNT(*) as count FROM ad_shapes').get() as { count: number };
-  if (shapeCount.count === 0) {
-    const shapes = ['Round', 'Heart', 'Tilak', 'Marquis', 'Oval', 'Pear', 'Princess', 'Cushion', 'Emerald', 'Radiant'];
-    const insertShape = db.prepare('INSERT INTO ad_shapes (shape) VALUES (?)');
-    shapes.forEach(shape => insertShape.run(shape));
-  }
-}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -182,7 +51,6 @@ function createWindow() {
 
 app.whenReady().then(() => {
   try {
-    initDatabase();
     createWindow();
   } catch (error) {
     console.error('Error during app initialization:', error);
@@ -197,54 +65,165 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
-    if (db) {
-      db.close();
-    }
     app.quit();
   }
 });
 
-// IPC handlers for database operations
-ipcMain.handle('db-query', async (event, sql: string, params: any[] = []) => {
-  if (!db) throw new Error('Database not initialized');
-  
-  try {
-    const stmt = db.prepare(sql);
-    const result = stmt.all(...params);
-    return { success: true, data: result };
-  } catch (error) {
-    return { success: false, error: (error as Error).message };
-  }
-});
-
-ipcMain.handle('db-run', async (event, sql: string, params: any[] = []) => {
-  if (!db) throw new Error('Database not initialized');
-  
-  try {
-    const stmt = db.prepare(sql);
-    const result = stmt.run(...params);
-    return { success: true, data: result };
-  } catch (error) {
-    return { success: false, error: (error as Error).message };
-  }
-});
-
-ipcMain.handle('db-get', async (event, sql: string, params: any[] = []) => {
-  if (!db) throw new Error('Database not initialized');
-  
-  try {
-    const stmt = db.prepare(sql);
-    const result = stmt.get(...params);
-    return { success: true, data: result };
-  } catch (error) {
-    return { success: false, error: (error as Error).message };
-  }
-});
-
+// IPC handlers for app info
 ipcMain.handle('get-app-version', async () => {
   return app.getVersion();
 });
 
 ipcMain.handle('get-app-path', async () => {
   return app.getAppPath();
+});
+
+// IPC handler to open external URLs in default browser
+ipcMain.handle('open-external', async (event, url: string) => {
+  try {
+    console.log('Opening external URL:', url);
+    // Use openExternal with { activate: true } to ensure it opens in default browser
+    await shell.openExternal(url, { activate: true });
+    console.log('URL opened successfully');
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to open external URL:', error);
+    return { success: false, error: (error as Error).message };
+  }
+});
+
+// IPC handler to copy image to clipboard using Electron's native clipboard
+ipcMain.handle('copy-image-to-clipboard', async (event, dataUrl: string) => {
+  let tempPath = null;
+  try {
+    console.log('=== Starting clipboard copy operation ===');
+    console.log('Data URL length:', dataUrl.length);
+    
+    // Remove data URL prefix if present
+    const base64Data = dataUrl.replace(/^data:image\/(png|jpeg|jpg);base64,/, '');
+    console.log('Base64 data length:', base64Data.length);
+    
+    // Create buffer from base64
+    const buffer = Buffer.from(base64Data, 'base64');
+    console.log('Buffer size:', buffer.length, 'bytes');
+    
+    if (buffer.length === 0) {
+      throw new Error('Buffer is empty - invalid base64 data');
+    }
+    
+    // Use temp file method as primary - most reliable across Electron versions
+    tempPath = path.join(app.getPath('temp'), `temp_clipboard_${Date.now()}.png`);
+    console.log('Writing to temp file:', tempPath);
+    
+    fs.writeFileSync(tempPath, buffer);
+    console.log('Temp file written successfully');
+    
+    // Verify file was written
+    const stats = fs.statSync(tempPath);
+    console.log('Temp file size:', stats.size, 'bytes');
+    
+    if (stats.size === 0) {
+      throw new Error('Temp file is empty');
+    }
+    
+    // Create native image from temp file
+    const image = nativeImage.createFromPath(tempPath);
+    console.log('Image created from temp file, empty:', image.isEmpty());
+    console.log('Image size:', image.getSize());
+    
+    if (image.isEmpty()) {
+      throw new Error('Image created from temp file is empty');
+    }
+    
+    // Try multiple clipboard methods for maximum compatibility
+    let clipboardSuccess = false;
+    
+    // Method 1: Try clipboard.writeImage first (most reliable)
+    try {
+      console.log('Trying clipboard.writeImage...');
+      if (typeof clipboard.writeImage === 'function') {
+        clipboard.writeImage(image);
+        clipboardSuccess = true;
+        console.log('✓ clipboard.writeImage succeeded');
+      } else {
+        console.warn('clipboard.writeImage is not available, trying clipboard.write');
+      }
+    } catch (writeImageError) {
+      console.warn('✗ clipboard.writeImage failed:', writeImageError.message);
+    }
+    
+    // Method 2: Try clipboard.write with image object if method 1 failed
+    if (!clipboardSuccess) {
+      try {
+        console.log('Trying clipboard.write({ image })...');
+        clipboard.write({ image: image });
+        clipboardSuccess = true;
+        console.log('✓ clipboard.write({ image }) succeeded');
+      } catch (writeError) {
+        console.warn('✗ clipboard.write({ image }) failed:', writeError.message);
+      }
+    }
+    
+    if (!clipboardSuccess) {
+      throw new Error('All clipboard methods failed');
+    }
+    
+    // Give the clipboard a moment to process
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Force clipboard availability check
+    console.log('Forcing clipboard availability check...');
+    const availableFormats = clipboard.availableFormats();
+    console.log('Available clipboard formats:', availableFormats);
+    
+    // Only verify if readImage is available (some Electron versions don't have it)
+    if (typeof clipboard.readImage === 'function') {
+      try {
+        const clipboardImage = clipboard.readImage();
+        console.log('Verification - clipboard image empty:', clipboardImage.isEmpty());
+        console.log('Verification - clipboard image size:', clipboardImage.getSize());
+        
+        if (clipboardImage.isEmpty()) {
+          // Try one more time with a different approach
+          console.log('Image appears empty, trying alternative method...');
+          clipboard.writeImage(image);
+          await new Promise(resolve => setTimeout(resolve, 200));
+          
+          const retryImage = clipboard.readImage();
+          console.log('Retry verification - clipboard image empty:', retryImage.isEmpty());
+          
+          if (retryImage.isEmpty()) {
+            throw new Error('Clipboard verification failed - image appears empty after write and retry');
+          }
+        }
+      } catch (readError) {
+        console.warn('Clipboard verification failed (readImage not available), but write may have succeeded:', readError.message);
+      }
+    } else {
+      console.log('clipboard.readImage not available, skipping verification');
+    }
+    
+    // Clean up temp file
+    fs.unlinkSync(tempPath);
+    tempPath = null;
+    console.log('Temp file cleaned up');
+    
+    console.log('=== Clipboard copy successful ===');
+    return { success: true };
+  } catch (error) {
+    console.error('=== Clipboard copy failed ===');
+    console.error('Error details:', error);
+    
+    // Clean up temp file if it exists
+    if (tempPath && fs.existsSync(tempPath)) {
+      try {
+        fs.unlinkSync(tempPath);
+        console.log('Temp file cleaned up after error');
+      } catch (cleanupError) {
+        console.error('Failed to clean up temp file:', cleanupError);
+      }
+    }
+    
+    return { success: false, error: (error as Error).message };
+  }
 });

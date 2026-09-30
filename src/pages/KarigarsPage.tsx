@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useRef } from "react";
+import React from "react";
 import { useNavigate } from "react-router-dom";
 import { useForm, type SubmitHandler, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -102,13 +103,13 @@ function FieldRow({
 }
 
 // ── WhatsApp image card (off-screen) ──────────────────────────────────────────
-function KarigarWhatsAppCard({
-  karigar,
-  orders,
-}: {
-  karigar: Karigar;
-  orders: Order[];
-}) {
+const KarigarWhatsAppCard = React.forwardRef<
+  HTMLDivElement,
+  {
+    karigar: Karigar;
+    orders: Order[];
+  }
+>(({ karigar, orders }, ref) => {
   const assignedOrders = orders.filter((o) =>
     o.karigarAssignments?.some((a) => a.karigarId === karigar.id),
   );
@@ -117,6 +118,7 @@ function KarigarWhatsAppCard({
 
   return (
     <div
+      ref={ref}
       style={{
         width: 540,
         background: "#ffffff",
@@ -124,6 +126,7 @@ function KarigarWhatsAppCard({
         padding: 24,
         borderRadius: 12,
         color: "#1a1a1a",
+        display: "block", // Ensure it's visible for html2canvas
       }}
     >
       <div
@@ -171,6 +174,7 @@ function KarigarWhatsAppCard({
                   <th style={{ padding: "6px 8px", textAlign: "left", color: "#374151", fontWeight: 600 }}>Pattern #</th>
                   <th style={{ padding: "6px 8px", textAlign: "right", color: "#374151", fontWeight: 600 }}>Total Pcs</th>
                   <th style={{ padding: "6px 8px", textAlign: "right", color: "#374151", fontWeight: 600 }}>Total Tree</th>
+                  <th style={{ padding: "6px 8px", textAlign: "left", color: "#374151", fontWeight: 600 }}>Touch</th>
                 </>
               ) : (
                 <>
@@ -180,6 +184,7 @@ function KarigarWhatsAppCard({
                   <th style={{ padding: "6px 8px", textAlign: "right", color: "#374151", fontWeight: 600 }}>Total Pcs</th>
                   <th style={{ padding: "6px 8px", textAlign: "right", color: "#374151", fontWeight: 600 }}>Total Tree</th>
                   <th style={{ padding: "6px 8px", textAlign: "left", color: "#374151", fontWeight: 600 }}>Stone Details</th>
+                  <th style={{ padding: "6px 8px", textAlign: "left", color: "#374151", fontWeight: 600 }}>Touch</th>
                 </>
               )}
             </tr>
@@ -198,20 +203,39 @@ function KarigarWhatsAppCard({
                 .map((i) => i.snapshot?.patternNumber || "—")
                 .join(", ");
               
-              // For stone karigars, gather stone details
+              // For stone karigars, gather stone details with sizes
               let stoneDetails = "";
               if (!isWaxKarigar && o.stoneUsage && o.stoneUsage.length > 0) {
                 const microStones = o.stoneUsage.filter(s => s.stoneType === 'micro');
                 const adStones = o.stoneUsage.filter(s => s.stoneType === 'ad');
                 
-                const microDetails = microStones.map(s => `${s.stoneName}: ${s.quantityUsed}`).join(", ");
-                const adDetails = adStones.map(s => `${s.stoneName}: ${s.quantityUsed}`).join(", ");
+                // Group Micro stones by size and sum quantities
+                const microBySize = microStones.reduce((acc: Record<string, number>, s) => {
+                  const size = s.stoneName; // stoneName contains size for micro
+                  acc[size] = (acc[size] || 0) + s.quantityUsed;
+                  return acc;
+                }, {} as Record<string, number>);
+                
+                // Group AD stones by size and sum quantities
+                const adBySize = adStones.reduce((acc: Record<string, number>, s) => {
+                  const size = s.stoneName; // stoneName contains size for AD
+                  acc[size] = (acc[size] || 0) + s.quantityUsed;
+                  return acc;
+                }, {} as Record<string, number>);
                 
                 const totalStones = o.stoneUsage.reduce((sum, s) => sum + s.quantityUsed, 0);
                 
+                // Format stone details with size breakdown
+                const microSizes = Object.entries(microBySize)
+                  .map(([size, qty]) => `${size}: ${qty}`)
+                  .join(", ");
+                const adSizes = Object.entries(adBySize)
+                  .map(([size, qty]) => `${size}: ${qty}`)
+                  .join(", ");
+                
                 stoneDetails = `Total: ${totalStones}`;
-                if (microDetails) stoneDetails += ` | Micro: ${microDetails}`;
-                if (adDetails) stoneDetails += ` | AD: ${adDetails}`;
+                if (microSizes) stoneDetails += ` | Micro: ${microSizes}`;
+                if (adSizes) stoneDetails += ` | AD: ${adSizes}`;
               }
 
               return (
@@ -230,6 +254,7 @@ function KarigarWhatsAppCard({
                   {!isWaxKarigar && (
                     <td style={{ padding: "6px 8px", fontSize: 10, color: "#6b7280" }}>{stoneDetails}</td>
                   )}
+                  <td style={{ padding: "6px 8px", fontSize: 10, color: "#6b7280" }}>{o.touch || "—"}</td>
                 </tr>
               );
             })}
@@ -249,7 +274,7 @@ function KarigarWhatsAppCard({
       </div>
     </div>
   );
-}
+});
 
 // ── Karigar Form Page ─────────────────────────────────────────────────────────
 function KarigarFormPage({
@@ -832,6 +857,7 @@ function KarigarDetailPage({
   const [yearFilter, setYearFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [generatingImg, setGeneratingImg] = useState(false);
 
   const assignedOrders = useMemo(
     () =>
@@ -887,42 +913,111 @@ function KarigarDetailPage({
   );
 
   const handleShareWhatsApp = async () => {
-    if (!cardRef.current) return;
+    setGeneratingImg(true);
     try {
       toast.loading("Generating WhatsApp image...");
+
+      // Wait for the ref to be properly available
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      if (!cardRef.current) {
+        throw new Error("Card element not found");
+      }
+
+      console.log("Starting html2canvas with element:", cardRef.current);
       
-      const canvas = await html2canvas(cardRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-      });
-      
-      const blob = await new Promise<Blob>((res) =>
-        canvas.toBlob((b) => res(b!), "image/jpeg", 0.95),
-      );
-      
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${karigar.name.replace(/\s+/g, "_")}_orders_${new Date().toISOString().slice(0,10)}.jpg`;
-      a.click();
-      URL.revokeObjectURL(url);
-      
+      // Add timeout to prevent infinite loading
+      const canvas = await Promise.race([
+        html2canvas(cardRef.current, {
+          scale: 1.5, // Reduced scale for faster rendering
+          useCORS: true,
+          backgroundColor: "#ffffff",
+          allowTaint: true,
+          logging: true, // Enable logging for debugging
+          removeContainer: true,
+          foreignObjectRendering: false, // Disable for better compatibility
+        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Image generation timeout")), 10000)
+        )
+      ]) as HTMLCanvasElement;
+
+      console.log("Canvas generated successfully, size:", canvas.width, "x", canvas.height);
+
+      // Convert canvas to data URL
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85); // Slightly lower quality for speed
+      console.log("Data URL generated, length:", dataUrl.length);
+
+      // Try to copy using Electron API
+      let copied = false;
+      if (window.electronAPI?.copyImageToClipboard) {
+        try {
+          console.log("Attempting Electron clipboard copy...");
+          const result = await window.electronAPI.copyImageToClipboard(dataUrl);
+          if (result.success) {
+            copied = true;
+            console.log("Successfully copied using Electron clipboard");
+          } else {
+            console.warn("Electron clipboard returned false:", result.error);
+            // Try browser fallback if Electron fails
+            throw new Error(result.error || "Electron clipboard failed");
+          }
+        } catch (e) {
+          console.warn("Electron clipboard failed, trying browser fallback:", e);
+          // Fallback: try to copy to clipboard using browser API
+          try {
+            const response = await fetch(dataUrl);
+            const blob = await response.blob();
+            await navigator.clipboard.write([
+              new ClipboardItem({ 'image/jpeg': blob })
+            ]);
+            copied = true;
+            console.log("Successfully copied using browser clipboard API fallback");
+          } catch (browserError) {
+            console.warn("Browser clipboard fallback also failed:", browserError);
+          }
+        }
+      } else {
+        console.log("Electron API not available, using browser clipboard fallback");
+        // Fallback: try to copy to clipboard using browser API
+        try {
+          const response = await fetch(dataUrl);
+          const blob = await response.blob();
+          await navigator.clipboard.write([
+            new ClipboardItem({ 'image/jpeg': blob })
+          ]);
+          copied = true;
+          console.log("Successfully copied using browser clipboard API");
+        } catch (e) {
+          console.warn("Browser clipboard fallback failed:", e);
+        }
+      }
+
       const wa = karigar.whatsapp || karigar.mobile;
       const num = wa.replace(/\D/g, "");
-      
-      // Open WhatsApp with the correct number
+
+      // Open WhatsApp Web with the correct number
       setTimeout(() => {
-        window.open(
-          `https://wa.me/${num.startsWith("91") ? num : "91" + num}`,
-          "_blank",
-        );
-      }, 500);
-      
-      toast.success("Image downloaded! Attach it in WhatsApp chat.");
-    } catch (e) {
-      toast.error("Failed to generate image");
-      console.error(e);
+        const url = `https://web.whatsapp.com/send?phone=${num.startsWith("91") ? num : "91" + num}`;
+
+        // Use Electron API to open in default browser (Chrome)
+        if (window.electronAPI?.openExternal) {
+          window.electronAPI.openExternal(url);
+        } else {
+          window.open(url, "_blank");
+        }
+
+        if (copied) {
+          toast.success("WhatsApp Image Auto-Send Initiated! WhatsApp Web is opening in Chrome. The karigar orders image has been copied to your clipboard. 👉 Click inside the WhatsApp chat box and press CTRL + V (Paste) to send the image.");
+        } else {
+          toast.success("WhatsApp Web is opening in Chrome. Please attach the work order image manually.");
+        }
+      }, 300);
+    } catch (error) {
+      console.error("Clipboard error:", error);
+      toast.error(`Failed to generate image: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setGeneratingImg(false);
     }
   };
 
@@ -956,10 +1051,11 @@ function KarigarDetailPage({
           variant="outline"
           className="h-7 text-xs ml-2"
           onClick={handleShareWhatsApp}
+          disabled={generatingImg}
         >
           <ImageDown size={12} className="mr-1" />
           <MessageCircle size={12} className="mr-1" />
-          WhatsApp JPG
+          {generatingImg ? "Generating..." : "WhatsApp JPG"}
         </Button>
         <Button size="sm" className="h-7 text-xs ml-1" onClick={onEdit}>
           <Pencil size={12} className="mr-1" />
@@ -1252,10 +1348,8 @@ function KarigarDetailPage({
       </div>
 
       {/* Off-screen WhatsApp card */}
-      <div style={{ position: "fixed", left: -9999, top: -9999, zIndex: -1 }}>
-        <div ref={cardRef}>
-          <KarigarWhatsAppCard karigar={karigar} orders={allOrders} />
-        </div>
+      <div style={{ position: "fixed", left: -9999, top: -9999, zIndex: -1, visibility: "hidden" }}>
+        <KarigarWhatsAppCard karigar={karigar} orders={allOrders} ref={cardRef} />
       </div>
     </div>
   );
