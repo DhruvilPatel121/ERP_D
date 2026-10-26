@@ -473,11 +473,12 @@ export function addADDiamond(stone: Omit<ADDiamond, 'id' | 'stoneId' | 'createdA
     id: nanoid(),
     stoneId: `AD-${String(stones.length + 1).padStart(4, '0')}`,
     shape: shape?.shape || '',
-    stoneName: `${shape?.shape || ''} ${stone.size}`,
+    stoneName: `${shape?.shape || ''} ${stone.size}${stone.color ? ` (${stone.color})` : ''}`,
     totalQuantity: stone.quantity, // Initialize totalQuantity with initial quantity
     categoryId: stone.categoryId || '',
     supplier: stone.supplier || '',
     notes: stone.notes || '',
+    color: stone.color || '',
     createdAt: now(),
     updatedAt: now(),
   };
@@ -500,7 +501,16 @@ export function updateADDiamond(id: ID, updates: Partial<ADDiamond>): ADDiamond 
     const shapes = getADShapes();
     const shape = shapes.find(s => s.id === updates.shape_id);
     finalUpdates.shape = shape?.shape || '';
-    finalUpdates.stoneName = `${shape?.shape || ''} ${updates.size || currentStone.size}`;
+    const color = updates.color !== undefined ? updates.color : currentStone.color;
+    finalUpdates.stoneName = `${shape?.shape || ''} ${updates.size || currentStone.size}${color ? ` (${color})` : ''}`;
+  }
+  
+  // If size or color is being updated, update stoneName
+  if (updates.size !== undefined || updates.color !== undefined) {
+    const shape = finalUpdates.shape || currentStone.shape;
+    const size = updates.size !== undefined ? updates.size : currentStone.size;
+    const color = updates.color !== undefined ? updates.color : currentStone.color;
+    finalUpdates.stoneName = `${shape} ${size}${color ? ` (${color})` : ''}`;
   }
   
   // If quantity is being increased (adding stock), add to totalQuantity

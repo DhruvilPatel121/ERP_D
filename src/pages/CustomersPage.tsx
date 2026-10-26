@@ -673,6 +673,9 @@ function CustomerDetailPage({
   const activeOrders = allOrders.filter(
     (o) => !["delivered", "cancelled"].includes(o.status),
   ).length;
+  const pendingOrders = allOrders.filter(
+    (o) => o.status === "pending" || o.status === "assigned" || o.status === "wax_in_progress" || o.status === "wax_completed" || o.status === "stone_setting_pending" || o.status === "stone_setting_in_progress" || o.status === "production_completed" || o.status === "ready"
+  ).length;
 
   return (
     <div className="page-panel">
@@ -711,9 +714,10 @@ function CustomerDetailPage({
       <div className="page-panel-body">
         <div className="max-w-3xl mx-auto flex flex-col gap-4">
           {/* Stat cards */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-4 gap-3">
             {[
               { label: "Total Orders", value: totalOrders, icon: Package },
+              { label: "Pending Orders", value: pendingOrders, icon: AlertTriangle },
               { label: "Active Orders", value: activeOrders, icon: Filter },
               {
                 label: "Since",
@@ -979,6 +983,28 @@ export default function CustomersPage() {
     });
   }, [customers, search, showInactive, yearFilter]);
 
+  // Calculate pending orders for each customer
+  const customerPendingOrders = useMemo(() => {
+    const orders = getOrders();
+    const map = new Map<string, number>();
+    customers.forEach((c) => {
+      const pending = orders.filter(
+        (o) =>
+          o.customerId === c.id &&
+          (o.status === "pending" ||
+           o.status === "assigned" ||
+           o.status === "wax_in_progress" ||
+           o.status === "wax_completed" ||
+           o.status === "stone_setting_pending" ||
+           o.status === "stone_setting_in_progress" ||
+           o.status === "production_completed" ||
+           o.status === "ready")
+      ).length;
+      map.set(c.id, pending);
+    });
+    return map;
+  }, [customers]);
+
   const handleSaved = () => {
     setView(selected ? "detail" : "list");
     refresh();
@@ -1124,6 +1150,14 @@ export default function CustomersPage() {
                       >
                         {c.isActive ? "Active" : "Inactive"}
                       </Badge>
+                      {customerPendingOrders.get(c.id) > 0 && (
+                        <Badge
+                          variant="destructive"
+                          className="text-[10px] h-4 px-1.5"
+                        >
+                          {customerPendingOrders.get(c.id)} Pending
+                        </Badge>
+                      )}
                       <span className="text-[10px] text-muted-foreground">
                         {formatDate(c.createdAt)}
                       </span>

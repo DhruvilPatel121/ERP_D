@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/ERPAuthContext";
+import { useTabs } from "@/contexts/TabContext";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
@@ -31,6 +32,36 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { TabBar } from "@/components/common/TabBar";
+
+// Helper function to get page title from path
+function getPageTitle(path: string): string {
+  const titles: Record<string, string> = {
+    "/dashboard": "Dashboard",
+    "/customers": "Customers",
+    "/stones": "Stones",
+    "/stones/micro": "Micro Diamonds",
+    "/stones/ad": "AD Diamonds",
+    "/patterns": "Patterns",
+    "/orders": "Orders",
+    "/wax-orders": "Wax Orders",
+    "/stone-orders": "Stone Orders",
+    "/karigars": "Karigars",
+    "/production": "Production",
+    "/reports": "Reports",
+    "/export": "Export",
+    "/backup": "Backup",
+    "/activity": "Activity",
+    "/settings": "Settings",
+  };
+
+  // Check for dynamic routes
+  if (path.startsWith("/customers/")) return "Customer Details";
+  if (path.startsWith("/patterns/")) return "Pattern Details";
+  if (path.startsWith("/orders/")) return "Order Details";
+
+  return titles[path] || "Page";
+}
 
 interface NavItem {
   label: string;
@@ -45,12 +76,14 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Stones", icon: Gem, href: "/stones" },
   { label: "Patterns", icon: Package, href: "/patterns" },
   { label: "Orders", icon: ShoppingCart, href: "/orders" },
-  { label: "Karigars", icon: Hammer, href: "/karigars" },
-  { label: "Production", icon: Factory, href: "/production" },
-  { label: "Reports", icon: BarChart3, href: "/reports" },
-  { label: "Export", icon: FileDown, href: "/export" },
-  { label: "Backup", icon: Database, href: "/backup" },
-  { label: "Activity Log", icon: History, href: "/activity" },
+  { label: "Wax Orders", icon: Hammer, href: "/wax-orders" },
+  { label: "Stone Orders", icon: Sparkles, href: "/stone-orders" },
+  { label: "Karigars", icon: Factory, href: "/karigars" },
+  { label: "Production", icon: BarChart3, href: "/production" },
+  { label: "Reports", icon: FileDown, href: "/reports" },
+  { label: "Export", icon: Database, href: "/export" },
+  { label: "Backup", icon: History, href: "/backup" },
+  { label: "Activity Log", icon: Circle, href: "/activity" },
   { label: "Settings", icon: Settings, href: "/settings" },
 ];
 
@@ -231,6 +264,15 @@ function StatusBar() {
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { tabs, addTab } = useTabs();
+  const location = useLocation();
+
+  // Auto-add current page as a tab
+  useEffect(() => {
+    const path = location.pathname;
+    const title = getPageTitle(path);
+    addTab(title, path);
+  }, [location.pathname]);
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -263,6 +305,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
         {/* Main area */}
         <div className="erp-main">
+          {/* Tab bar - always show */}
+          <TabBar />
+
           {/* Top toolbar */}
           <div className="erp-toolbar">
             {/* Desktop collapse toggle */}

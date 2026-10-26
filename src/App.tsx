@@ -2,6 +2,7 @@ import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import IntersectObserver from "@/components/common/IntersectObserver";
 import { useAuth } from "@/contexts/ERPAuthContext";
+import { TabProvider } from "@/contexts/TabContext";
 import { AppLayout } from "@/components/layouts/AppLayout";
 
 // Pages
@@ -13,6 +14,8 @@ import StonesPage from "@/pages/StonesPage";
 import PatternsPage from "@/pages/PatternsPage";
 import OrdersPage from "@/pages/OrdersPage";
 import OrderDetailPage from "@/pages/OrderDetailPage";
+import WaxOrdersPage from "@/pages/WaxOrdersPage";
+import StoneOrdersPage from "@/pages/StoneOrdersPage";
 import KarigarsPage from "@/pages/KarigarsPage";
 import ProductionPage from "@/pages/ProductionPage";
 import ReportsPage from "@/pages/ReportsPage";
@@ -34,7 +37,8 @@ const App: React.FC = () => {
   return (
     <>
       <IntersectObserver />
-      <Routes>
+      <TabProvider>
+        <Routes>
         <Route
           path="/setup"
           element={
@@ -140,6 +144,22 @@ const App: React.FC = () => {
           }
         />
         <Route
+          path="/wax-orders"
+          element={
+            <ProtectedLayout>
+              <WaxOrdersPage />
+            </ProtectedLayout>
+          }
+        />
+        <Route
+          path="/stone-orders"
+          element={
+            <ProtectedLayout>
+              <StoneOrdersPage />
+            </ProtectedLayout>
+          }
+        />
+        <Route
           path="/karigars"
           element={
             <ProtectedLayout>
@@ -211,6 +231,7 @@ const App: React.FC = () => {
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </TabProvider>
     </>
   );
 };

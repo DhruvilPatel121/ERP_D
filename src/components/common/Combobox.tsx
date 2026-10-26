@@ -34,6 +34,7 @@ export function Combobox({
   const [dropdownPosition, setDropdownPosition] = React.useState({ top: 0, left: 0, width: 0 });
   const inputRef = React.useRef<HTMLInputElement>(null);
   const dropdownRef = React.useRef<HTMLDivElement>(null);
+  const portalRef = React.useRef<HTMLDivElement>(null);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
 
   const selectedOption = options.find((opt) => opt.value === value);
@@ -42,7 +43,7 @@ export function Combobox({
     if (!search) return options;
     const searchLower = search.toLowerCase();
     return options.filter((opt) =>
-      opt.label.toLowerCase().includes(searchLower)
+      opt.label && opt.label.toLowerCase().includes(searchLower)
     );
   }, [options, search]);
 
@@ -74,9 +75,9 @@ export function Combobox({
     if (inputRef.current) {
       const rect = inputRef.current.getBoundingClientRect();
       setDropdownPosition({
-        top: rect.bottom + window.scrollY + 4,
-        left: rect.left + window.scrollX,
-        width: rect.width,
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: Math.max(rect.width, 300), // Ensure minimum width for visibility
       });
     }
   };
@@ -109,6 +110,9 @@ export function Combobox({
         } else if (filteredOptions.length === 1) {
           // If only one match, select it on Enter
           handleSelect(filteredOptions[0].value);
+        } else {
+          // If dropdown is open but no highlighted item, close it and allow focus to move
+          setIsOpen(false);
         }
         break;
       case "Escape":
@@ -121,6 +125,7 @@ export function Combobox({
           handleSelect(filteredOptions[highlightedIndex].value);
         }
         setIsOpen(false);
+        // Don't prevent default - allow Tab to move to next field
         break;
     }
   };
@@ -138,8 +143,8 @@ export function Combobox({
   React.useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target as Node) &&
+        portalRef.current &&
+        !portalRef.current.contains(event.target as Node) &&
         inputRef.current &&
         !inputRef.current.contains(event.target as Node)
       ) {
@@ -154,7 +159,7 @@ export function Combobox({
   }, []);
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative">
       <div className="relative">
         <Input
           ref={inputRef}
@@ -184,9 +189,10 @@ export function Combobox({
             style={{
               top: `${dropdownPosition.top}px`,
               left: `${dropdownPosition.left}px`,
-              width: `${dropdownPosition.width}px`,
+              width: `${Math.max(dropdownPosition.width, 300)}px`, // Ensure minimum width for visibility
+              minWidth: '300px',
             }}
-            ref={dropdownRef}
+            ref={portalRef}
           >
             {filteredOptions.length === 0 ? (
               <div className="px-3 py-2 text-sm text-muted-foreground">

@@ -79,6 +79,7 @@ const microSchema = z.object({
 const adSchema = z.object({
   shapeId: z.string().min(1, "Shape required"),
   size: z.string().min(1, "Size required"),
+  color: z.string().optional(),
   quantity: z.preprocess(
     (v) => (v === "" ? 0 : Number(v)),
     z.number().min(0, "Quantity must be positive"),
@@ -645,6 +646,7 @@ function ADDiamondFormPage({
       ? {
           shapeId: stone.shape_id?.toString() || selectedShape?.id?.toString() || "",
           size: stone.size,
+          color: stone.color || "",
           quantity: stone.quantity || 0,
           weight: stone.weight || 0,
           pricePerPiece: stone.price_per_piece || 0,
@@ -652,6 +654,7 @@ function ADDiamondFormPage({
         }
       : { 
           shapeId: selectedShape?.id?.toString() || "",
+          color: "",
           isActive: true, 
           quantity: 0, 
           weight: 0, 
@@ -673,6 +676,7 @@ function ADDiamondFormPage({
         updateADDiamond(stone.id, {
           shape_id: parseInt(v.shapeId),
           size: v.size,
+          color: v.color || stone.color || "",
           quantity: finalQuantity,
           totalQuantity: restock > 0 ? (stone.totalQuantity || quantity) + restock : undefined,
           weight,
@@ -684,6 +688,7 @@ function ADDiamondFormPage({
         addADDiamond({
           shape_id: parseInt(v.shapeId),
           size: v.size,
+          color: v.color || "",
           quantity,
           weight,
           price_per_piece: pricePerPiece,
@@ -786,6 +791,24 @@ function ADDiamondFormPage({
                             {...field}
                             className="h-8 text-sm"
                             placeholder="e.g. 3×2 mm"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </FieldRow>
+                <FieldRow label="Color">
+                  <FormField
+                    control={form.control}
+                    name="color"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            placeholder="e.g., D, E, F, VVS"
+                            className="h-8 text-sm"
                           />
                         </FormControl>
                         <FormMessage />
@@ -1064,6 +1087,7 @@ function ADDetailPage({
                 [
                   ["Shape", stone.shape],
                   ["Size", stone.size],
+                  ["Color", stone.color || "—"],
                   ["Quantity", stone.quantity || 0],
                   ["Weight (grams)", stone.weight || 0],
                   ["Price per Piece", stone.price_per_piece || 0],
@@ -1105,11 +1129,44 @@ function MicroListPage({
 }) {
   const sizes = getMicroDiamonds();
   const [search, setSearch] = useState("");
+  const [showRestock, setShowRestock] = useState(false);
+  const [selectedStone, setSelectedStone] = useState<any>(null);
+  const [restockAmount, setRestockAmount] = useState(0);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return sizes.filter((s) => !q || s.size.toLowerCase().includes(q));
   }, [sizes, search]);
+
+  const handleRestock = () => {
+    if (!selectedStone || restockAmount <= 0) {
+      toast.error("Please select a stone and enter restock quantity");
+      return;
+    }
+
+    try {
+      const finalQuantity = (selectedStone.quantity || 0) + restockAmount;
+      const finalTotalQuantity = (selectedStone.totalQuantity || selectedStone.quantity || 0) + restockAmount;
+      
+      updateMicroDiamond(selectedStone.id, {
+        quantity: finalQuantity,
+        totalQuantity: finalTotalQuantity,
+      });
+      
+      toast.success(`Restocked ${restockAmount} ${selectedStone.size} micro diamonds`);
+      setShowRestock(false);
+      setSelectedStone(null);
+      setRestockAmount(0);
+      
+      // Force reload of the list
+      if (forceReload !== undefined) {
+        // This will trigger a re-render through the parent component
+      }
+    } catch (error) {
+      console.error("Failed to restock:", error);
+      toast.error("Failed to restock micro diamonds");
+    }
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -1121,12 +1178,84 @@ function MicroListPage({
         title="Micro Diamond Sizes"
         subtitle={`${sizes.length} sizes`}
         actions={
-          <Button size="sm" className="h-7 text-xs" onClick={onAdd}>
-            <Plus size={12} className="mr-1" />
-            Add Micro Diamond
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShowRestock(true)}>
+              <Plus size={12} className="mr-1" />
+              Restock
+            </Button>
+            <Button size="sm" className="h-7 text-xs" onClick={onAdd}>
+              <Plus size={12} className="mr-1" />
+              Add Micro Diamond
+            </Button>
+          </div>
         }
       />
+      
+      {/* Restock Dialog */}
+      {showRestock && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="card-l1 p-6 w-full max-w-md">
+            <h3 className="text-sm font-semibold mb-4">Restock Micro Diamonds</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs text-muted-foreground mb-2 block">Select Stone Size</label>
+                <Select value={selectedStone?.id || ""} onValueChange={(value) => {
+                  const stone = sizes.find(s => s.id === value);
+                  setSelectedStone(stone);
+                }}>
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue placeholder="Select stone size" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sizes.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.size} {s.color ? `(${s.color})` : ''} (Stock: {s.quantity || 0} / {s.totalQuantity || 0})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <label className="text-xs text-muted-foreground mb-2 block">Restock Quantity</label>
+                <Input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={restockAmount || ""}
+                  onChange={(e) => setRestockAmount(Number(e.target.value))}
+                  placeholder="Enter quantity to add"
+                  className="h-8 text-sm"
+                />
+                {selectedStone && restockAmount > 0 && (
+                  <div className="mt-2 text-xs text-accent font-medium">
+                    New total: {(selectedStone.quantity || 0) + restockAmount} / {(selectedStone.totalQuantity || selectedStone.quantity || 0) + restockAmount}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="flex gap-2 justify-end mt-6">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={() => {
+                  setShowRestock(false);
+                  setSelectedStone(null);
+                  setRestockAmount(0);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button size="sm" className="h-7 text-xs" onClick={handleRestock}>
+                Restock
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="erp-toolbar border-b border-border bg-background">
         <SearchInput
           value={search}
@@ -1198,7 +1327,14 @@ function ADShapesPage({
   const shapes = getADShapes();
   const [search, setSearch] = useState("");
   const [showAddShape, setShowAddShape] = useState(false);
+  const [showRestock, setShowRestock] = useState(false);
   const [newShapeName, setNewShapeName] = useState("");
+  
+  // Restock state
+  const [restockShape, setRestockShape] = useState<any>(null);
+  const [restockSize, setRestockSize] = useState<any>(null);
+  const [restockColor, setRestockColor] = useState("");
+  const [restockQuantity, setRestockQuantity] = useState(0);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -1222,6 +1358,54 @@ function ADShapesPage({
     toast.success("Shape deleted successfully");
   };
 
+  const handleRestock = () => {
+    if (!restockShape || !restockSize || restockQuantity <= 0) {
+      toast.error("Please select shape, size, color and enter restock quantity");
+      return;
+    }
+
+    try {
+      const finalQuantity = (restockSize.quantity || 0) + restockQuantity;
+      const finalTotalQuantity = (restockSize.totalQuantity || restockSize.quantity || 0) + restockQuantity;
+      
+      updateADDiamond(restockSize.id, {
+        quantity: finalQuantity,
+        totalQuantity: finalTotalQuantity,
+      });
+      
+      toast.success(`Restocked ${restockQuantity} ${restockSize.size} ${restockShape.shape} (${restockColor || 'N/A'}) diamonds`);
+      setShowRestock(false);
+      setRestockShape(null);
+      setRestockSize(null);
+      setRestockColor("");
+      setRestockQuantity(0);
+      
+      // Force reload by incrementing a counter or calling the parent
+      if (forceReload !== undefined) {
+        // Parent component will need to handle this
+      }
+    } catch (error) {
+      console.error("Failed to restock:", error);
+      toast.error("Failed to restock AD diamonds");
+    }
+  };
+
+  const shapesForRestock = shapes;
+  const sizesForRestock = restockShape ? getADDiamonds().filter((d) => d.shape_id === restockShape.id) : [];
+  const colorsForRestock = sizesForRestock.length > 0 ? [...new Set(sizesForRestock.map(s => s.color).filter(Boolean))] : [];
+  
+  // Filter sizes by selected color - if color is selected, only show sizes with that color
+  const filteredSizesForRestock = restockColor 
+    ? sizesForRestock.filter(s => s.color === restockColor)
+    : sizesForRestock;
+  
+  // If color is selected but no matching size found, reset restockSize
+  useEffect(() => {
+    if (restockColor && restockSize && restockSize.color !== restockColor) {
+      setRestockSize(null);
+    }
+  }, [restockColor, restockSize]);
+
   return (
     <div className="flex flex-col h-full">
       <PageToolbar
@@ -1233,6 +1417,10 @@ function ADShapesPage({
         subtitle={`${shapes.length} shapes`}
         actions={
           <div className="flex gap-2">
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShowRestock(true)}>
+              <Plus size={12} className="mr-1" />
+              Restock
+            </Button>
             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShowAddShape(true)}>
               <Plus size={12} className="mr-1" />
               Add Shape
@@ -1244,6 +1432,125 @@ function ADShapesPage({
           </div>
         }
       />
+      
+      {/* Restock Dialog */}
+      {showRestock && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="card-l1 p-6 w-full max-w-md">
+            <h3 className="text-sm font-semibold mb-4">Restock AD Diamonds</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs text-muted-foreground mb-2 block">1. Select Shape</label>
+                <Select value={restockShape?.id?.toString() || ""} onValueChange={(value) => {
+                  const shape = shapes.find(s => s.id.toString() === value);
+                  setRestockShape(shape);
+                  setRestockSize(null);
+                  setRestockColor("");
+                }}>
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue placeholder="Select shape" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {shapes.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">No shapes available</div>
+                    ) : (
+                      shapes.map((s) => (
+                        <SelectItem key={s.id} value={s.id.toString()}>
+                          {s.shape}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              {restockShape && (
+                <div>
+                  <label className="text-xs text-muted-foreground mb-2 block">2. Select Size</label>
+                  <Select value={restockSize?.id?.toString() || ""} onValueChange={(value) => {
+                    const size = filteredSizesForRestock.find(s => s.id.toString() === value);
+                    setRestockSize(size);
+                    setRestockColor("");
+                  }}>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Select size" />
+                    </SelectTrigger>
+                  <SelectContent>
+                    {filteredSizesForRestock.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">No sizes available for this shape</div>
+                    ) : (
+                      filteredSizesForRestock.map((s) => (
+                        <SelectItem key={s.id} value={s.id.toString()}>
+                          {s.size} {s.color ? `(${s.color})` : ''} (Stock: {s.quantity || 0})
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                  </Select>
+                </div>
+              )}
+              
+              {restockShape && colorsForRestock.length > 0 && (
+                <div>
+                  <label className="text-xs text-muted-foreground mb-2 block">3. Select Color</label>
+                  <Select value={restockColor || ""} onValueChange={setRestockColor}>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Select color" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All Colors</SelectItem>
+                      {colorsForRestock.map((color) => (
+                        <SelectItem key={color} value={color}>
+                          {color}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              
+              <div>
+                <label className="text-xs text-muted-foreground mb-2 block">Restock Quantity</label>
+                <Input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={restockQuantity || ""}
+                  onChange={(e) => setRestockQuantity(Number(e.target.value))}
+                  placeholder="Enter quantity to add"
+                  className="h-8 text-sm"
+                />
+                {restockSize && restockQuantity > 0 && (
+                  <div className="mt-2 text-xs text-accent font-medium">
+                    New total: {(restockSize.quantity || 0) + restockQuantity} / {(restockSize.totalQuantity || restockSize.quantity || 0) + restockQuantity}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="flex gap-2 justify-end mt-6">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={() => {
+                  setShowRestock(false);
+                  setRestockShape(null);
+                  setRestockSize(null);
+                  setRestockColor("");
+                  setRestockQuantity(0);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button size="sm" className="h-7 text-xs" onClick={handleRestock}>
+                Restock
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="erp-content">
         {/* Add Shape Dialog */}
         {showAddShape && (
@@ -1332,6 +1639,9 @@ function ADSizesPage({
   const allADDiamonds = getADDiamonds();
   const sizes = allADDiamonds.filter((d) => d.shape_id === shape.id);
   const [search, setSearch] = useState("");
+  const [showRestock, setShowRestock] = useState(false);
+  const [selectedStone, setSelectedStone] = useState<any>(null);
+  const [restockAmount, setRestockAmount] = useState(0);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -1340,6 +1650,36 @@ function ADSizesPage({
 
   const handleAdd = () => {
     onAdd();
+  };
+
+  const handleRestock = () => {
+    if (!selectedStone || restockAmount <= 0) {
+      toast.error("Please select a stone and enter restock quantity");
+      return;
+    }
+
+    try {
+      const finalQuantity = (selectedStone.quantity || 0) + restockAmount;
+      const finalTotalQuantity = (selectedStone.totalQuantity || selectedStone.quantity || 0) + restockAmount;
+      
+      updateADDiamond(selectedStone.id, {
+        quantity: finalQuantity,
+        totalQuantity: finalTotalQuantity,
+      });
+      
+      toast.success(`Restocked ${restockAmount} ${selectedStone.size} ${shape.shape} diamonds`);
+      setShowRestock(false);
+      setSelectedStone(null);
+      setRestockAmount(0);
+      
+      // Force reload of the list
+      if (forceReload !== undefined) {
+        // This will trigger a re-render through the parent component
+      }
+    } catch (error) {
+      console.error("Failed to restock:", error);
+      toast.error("Failed to restock AD diamonds");
+    }
   };
 
   return (
@@ -1353,12 +1693,84 @@ function ADSizesPage({
         title={`${shape.shape} Sizes`}
         subtitle={`${sizes.length} sizes`}
         actions={
-          <Button size="sm" className="h-7 text-xs" onClick={handleAdd}>
-            <Plus size={12} className="mr-1" />
-            Add AD Diamond
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShowRestock(true)}>
+              <Plus size={12} className="mr-1" />
+              Restock
+            </Button>
+            <Button size="sm" className="h-7 text-xs" onClick={handleAdd}>
+              <Plus size={12} className="mr-1" />
+              Add AD Diamond
+            </Button>
+          </div>
         }
       />
+      
+      {/* Restock Dialog */}
+      {showRestock && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="card-l1 p-6 w-full max-w-md">
+            <h3 className="text-sm font-semibold mb-4">Restock AD Diamonds</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs text-muted-foreground mb-2 block">Select Stone Size</label>
+                <Select value={selectedStone?.id || ""} onValueChange={(value) => {
+                  const stone = sizes.find(s => s.id === value);
+                  setSelectedStone(stone);
+                }}>
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue placeholder="Select stone size" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sizes.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.size} {s.color ? `(${s.color})` : ''} (Stock: {s.quantity || 0} / {s.totalQuantity || 0})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <label className="text-xs text-muted-foreground mb-2 block">Restock Quantity</label>
+                <Input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={restockAmount || ""}
+                  onChange={(e) => setRestockAmount(Number(e.target.value))}
+                  placeholder="Enter quantity to add"
+                  className="h-8 text-sm"
+                />
+                {selectedStone && restockAmount > 0 && (
+                  <div className="mt-2 text-xs text-accent font-medium">
+                    New total: {(selectedStone.quantity || 0) + restockAmount} / {(selectedStone.totalQuantity || selectedStone.quantity || 0) + restockAmount}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="flex gap-2 justify-end mt-6">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={() => {
+                  setShowRestock(false);
+                  setSelectedStone(null);
+                  setRestockAmount(0);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button size="sm" className="h-7 text-xs" onClick={handleRestock}>
+                Restock
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="erp-toolbar border-b border-border bg-background">
         <SearchInput
           value={search}
@@ -1389,7 +1801,7 @@ function ADSizesPage({
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="font-semibold text-sm text-accent hover:underline truncate">
-                      {s.size}
+                      {s.size} {s.color ? `(${s.color})` : ''}
                     </div>
                     <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
                       <div>

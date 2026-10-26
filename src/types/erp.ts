@@ -106,6 +106,7 @@ export interface ADDiamond {
   shape_id: number; // foreign key to ad_shapes
   shape: string;
   size: string; // e.g. "3x2 mm"
+  color: string; // e.g. "D", "E", "F", "VVS"
   length: number | null;
   width: number | null;
   weight: number; // total weight in grams
