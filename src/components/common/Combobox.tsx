@@ -14,6 +14,8 @@ interface ComboboxProps {
   value?: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  /** Shown in place of `placeholder` while the list is open for searching */
+  searchPlaceholder?: string;
   emptyMessage?: string;
   className?: string;
   disabled?: boolean;
@@ -24,6 +26,7 @@ export function Combobox({
   value,
   onChange,
   placeholder = "Select option...",
+  searchPlaceholder,
   emptyMessage = "No results found.",
   className,
   disabled = false,
@@ -167,7 +170,9 @@ export function Combobox({
           onChange={handleInputChange}
           onFocus={handleFocus}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          placeholder={
+            isOpen && searchPlaceholder ? searchPlaceholder : placeholder
+          }
           disabled={disabled}
           className={cn("pr-8", className)}
         />

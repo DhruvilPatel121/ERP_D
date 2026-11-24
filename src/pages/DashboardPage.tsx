@@ -113,7 +113,8 @@ export default function DashboardPage() {
       const qty = a.quantity || 0;
       const total = a.totalQuantity || qty;
       if (a.isActive !== false && qty <= LOW_STOCK_THRESHOLD) {
-        lowItems.push({ type: "AD", name: `${a.shape} ${a.size}`, available: qty, total });
+        const colorText = a.color ? ` ${a.color}` : '';
+        lowItems.push({ type: "AD", name: `${a.shape}${colorText} ${a.size}`, available: qty, total });
       }
     });
 

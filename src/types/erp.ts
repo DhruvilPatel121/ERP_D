@@ -17,7 +17,7 @@ export interface BusinessSettings {
 }
 
 export interface AppSettings {
-  roundingMode: 'ceiling' | 'floor' | 'round';
+  roundingMode: "ceiling" | "floor" | "round";
   backupFolder: string;
   lastBackup: string | null;
   waxMessageTemplate: string;
@@ -33,7 +33,7 @@ export interface User {
   id: ID;
   userId: string;
   passwordHash: string;
-  role: 'admin' | 'manager' | 'operator';
+  role: "admin" | "manager" | "operator";
   createdAt: string;
 }
 
@@ -68,7 +68,7 @@ export interface Customer {
 export interface StoneCategory {
   id: ID;
   name: string;
-  type: 'micro' | 'ad';
+  type: "micro" | "ad";
   isActive: boolean;
   createdAt: string;
 }
@@ -131,7 +131,7 @@ export interface ItemCategory {
 // Stone config on a pattern
 export interface PatternStoneConfig {
   id: ID;
-  stoneType: 'micro' | 'ad';
+  stoneType: "micro" | "ad";
   stoneId: ID;
   stoneName: string;
   stoneSize: string;
@@ -161,25 +161,25 @@ export interface Pattern {
 }
 
 // Order
-export type OrderType = 'grams' | 'pieces' | 'mixed';
-export type QuantityType = 'grams' | 'pieces';
+export type OrderType = "grams" | "pieces" | "mixed";
+export type QuantityType = "grams" | "pieces";
 export type OrderStatus =
-  | 'draft'
-  | 'confirmed'
-  | 'pending'
-  | 'assigned'
-  | 'wax_in_progress'
-  | 'wax_completed'
-  | 'stone_setting_pending'
-  | 'stone_setting_in_progress'
-  | 'stone_setting_completed'
-  | 'production_completed'
-  | 'ready'
-  | 'delivered'
-  | 'cancelled';
+  | "draft"
+  | "confirmed"
+  | "pending"
+  | "assigned"
+  | "wax_in_progress"
+  | "wax_completed"
+  | "stone_setting_pending"
+  | "stone_setting_in_progress"
+  | "stone_setting_completed"
+  | "production_completed"
+  | "ready"
+  | "delivered"
+  | "cancelled";
 
 export interface StoneRequirement {
-  stoneType: 'micro' | 'ad';
+  stoneType: "micro" | "ad";
   stoneId: ID;
   stoneName: string;
   stoneSize: string;
@@ -228,9 +228,20 @@ export interface StatusHistory {
 }
 
 export interface KarigarAssignment {
-  type: 'wax' | 'stone';
+  id: ID;
+  type: "wax" | "stone";
   karigarId: ID;
   karigarName: string;
+  /**
+   * Order item (pattern) this allotment belongs to.
+   * An empty string means the allotment covers the whole order
+   * (used by legacy records and by orders that are not split per pattern).
+   */
+  itemId: ID | "";
+  /** Pieces of the order item handed over to this karigar */
+  allottedPieces: number;
+  /** Silver weight in grams derived from allottedPieces × weight per piece */
+  allottedGrams: number;
   assignedAt: string;
   notes: string;
 }
@@ -265,9 +276,10 @@ export interface Order {
 }
 
 export interface StoneUsageRecord {
-  stoneType: 'micro' | 'ad';
+  stoneType: "micro" | "ad";
   stoneId: ID;
   stoneName: string; // e.g., "1.30mm" or "Oval 3x2mm"
+  stoneSize?: string; // e.g., "1.30 mm" or "3x2 mm"
   quantityUsed: number;
   itemId: ID; // Reference to OrderItem
 }
@@ -293,7 +305,7 @@ export interface PatternDiceRange {
   karigarId: ID;
   karigarName: string;
   fromNumber: number; // inclusive
-  toNumber: number;   // inclusive
+  toNumber: number; // inclusive
   notes: string;
   createdAt: string;
   updatedAt: string;
@@ -301,15 +313,28 @@ export interface PatternDiceRange {
 
 // Activity Log
 export type ActivityType =
-  | 'login'
-  | 'customer_created' | 'customer_edited' | 'customer_deleted'
-  | 'pattern_created' | 'pattern_edited' | 'pattern_deleted'
-  | 'stone_created' | 'stone_edited' | 'stone_deleted'
-  | 'order_created' | 'order_edited' | 'order_status_changed'
-  | 'karigar_assigned' | 'karigar_created' | 'karigar_edited'
-  | 'pdf_generated' | 'jpg_generated' | 'whatsapp_opened'
-  | 'backup_created' | 'restore_performed'
-  | 'demo_data_loaded';
+  | "login"
+  | "customer_created"
+  | "customer_edited"
+  | "customer_deleted"
+  | "pattern_created"
+  | "pattern_edited"
+  | "pattern_deleted"
+  | "stone_created"
+  | "stone_edited"
+  | "stone_deleted"
+  | "order_created"
+  | "order_edited"
+  | "order_status_changed"
+  | "karigar_assigned"
+  | "karigar_created"
+  | "karigar_edited"
+  | "pdf_generated"
+  | "jpg_generated"
+  | "whatsapp_opened"
+  | "backup_created"
+  | "restore_performed"
+  | "demo_data_loaded";
 
 export interface ActivityLog {
   id: ID;

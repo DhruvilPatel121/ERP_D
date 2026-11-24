@@ -13,6 +13,9 @@ import {
   ImageDown,
   Trash2,
   MessageCircle,
+  FileText,
+  ChevronDown,
+  Package,
 } from "lucide-react";
 import html2canvas from "html2canvas";
 import {
@@ -28,14 +31,24 @@ import {
   buildStoneMessage,
   formatNumber,
 } from "@/lib/calculations";
-import { formatDateTime, formatDate, cn } from "@/lib/utils";
+import { formatDateTime, formatDate, cn, nanoid } from "@/lib/utils";
 import {
   ORDER_STATUS_LABELS,
   getNextStatuses,
   isTerminalStatus,
 } from "@/lib/orderStatus";
+import {
+  assignmentsOfType,
+  buildSplitTargets,
+  describeAllotment,
+  gramsForPieces,
+  splitBalance,
+  WORK_TYPE_META,
+} from "@/lib/karigarSplit";
+import { generateOrderPdf } from "@/lib/orderPdf";
 import { PageToolbar } from "@/components/layouts/AppLayout";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import { KarigarSplitEditor } from "@/components/common/KarigarSplitEditor";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -46,8 +59,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
-import type { Order, OrderStatus } from "@/types/erp";
+import type { KarigarAssignment, Order, OrderStatus } from "@/types/erp";
 
 /* ── Progress Stepper ────────────────────────────────────────── */
 function ProgressStepper({ order }: { order: Order }) {
@@ -113,7 +134,7 @@ function ProgressStepper({ order }: { order: Order }) {
   );
 }
 
-/* ── Inline Karigar Assignment Panel ────────────────────────── */
+/* ── Inline Karigar Distribution Panel ──────────────────────── */
 function KarigarAssignPanel({
   order,
   type,
@@ -123,67 +144,89 @@ function KarigarAssignPanel({
   type: "wax" | "stone";
   onDone: () => void;
 }) {
-  const karigars = useMemo(() => getKarigars().filter((k) => k.isActive), []);
-  const [karigarId, setKarigarId] = useState("");
-  const [notes, setNotes] = useState("");
+  const karigars = useMemo(
+    () => getKarigars().filter((k) => k.isActive && k.type === type),
+    [type],
+  );
+  const targets = useMemo(() => buildSplitTargets(order.items), [order.items]);
+  const [rows, setRows] = useState<KarigarAssignment[]>(() =>
+    assignmentsOfType(order.karigarAssignments ?? [], type).map((a) => ({ ...a })),
+  );
 
-  const handleAssign = () => {
-    if (!karigarId) {
-      toast.error("Select a karigar");
+  const handleSave = () => {
+    if (rows.some((row) => !row.karigarId)) {
+      toast.error("Every allotment needs a karigar");
       return;
     }
-    const karigar = karigars.find((k) => k.id === karigarId)!;
-    const newStatus: OrderStatus =
+    if (rows.some((row) => !row.allottedPieces)) {
+      toast.error("Enter the number of pieces for every karigar");
+      return;
+    }
+
+    const balance = splitBalance(targets, rows, type, "");
+    if (balance.overAllocated) {
+      toast.error(
+        `Distribution exceeds the order by ${balance.totalAllotted - balance.totalRequired} pcs. Please adjust the quantities.`,
+      );
+      return;
+    }
+
+    // Rows inherit the stored item id, so no remapping is needed here
+    const saved: KarigarAssignment[] = rows.map((row) => ({
+      ...row,
+      id: row.id || nanoid(),
+      assignedAt: row.assignedAt || new Date().toISOString(),
+    }));
+
+    const advancesTo: OrderStatus =
       type === "wax" ? "wax_in_progress" : "stone_setting_in_progress";
+    const earlierStages: OrderStatus[] =
+      type === "wax"
+        ? ["pending", "assigned"]
+        : ["pending", "assigned", "wax_in_progress", "wax_completed", "stone_setting_pending"];
+    const shouldAdvance = saved.length > 0 && earlierStages.includes(order.status);
+
     updateOrder(order.id, {
       karigarAssignments: [
-        ...order.karigarAssignments,
-        {
-          type,
-          karigarId,
-          karigarName: karigar.name,
-          assignedAt: new Date().toISOString(),
-          notes,
-        },
+        ...(order.karigarAssignments ?? []).filter((a) => a.type !== type),
+        ...saved,
       ],
-      status: newStatus,
-      statusHistory: [
-        ...order.statusHistory,
-        {
-          status: newStatus,
-          changedAt: new Date().toISOString(),
-          changedBy: "admin",
-          notes: `${type === "wax" ? "Wax" : "Stone"} karigar: ${karigar.name}`,
-        },
-      ],
+      ...(shouldAdvance
+        ? {
+            status: advancesTo,
+            statusHistory: [
+              ...order.statusHistory,
+              {
+                status: advancesTo,
+                changedAt: new Date().toISOString(),
+                changedBy: "admin",
+                notes: `${type === "wax" ? "Wax" : "Stone"} work distributed to ${saved.length} karigar${saved.length > 1 ? "s" : ""}`,
+              },
+            ],
+          }
+        : {}),
     });
-    toast.success(`${karigar.name} assigned for ${type} work`);
+
+    const balanceAfter = splitBalance(targets, saved, type, "");
+    if (balanceAfter.unallocated > 0) {
+      toast.warning(
+        `${balanceAfter.unallocated} pcs are still without a karigar and can be distributed later.`,
+      );
+    }
+    toast.success(
+      `${type === "wax" ? "Wax" : "Stone"} work saved for ${saved.length} karigar${saved.length > 1 ? "s" : ""}`,
+    );
     onDone();
   };
 
   return (
-    <div className="card-l1 p-3 flex flex-col gap-2 animate-fade-in">
-      <p className="text-xs font-semibold">
-        Assign {type === "wax" ? "Wax" : "Stone Setting"} Karigar
-      </p>
-      <Select value={karigarId} onValueChange={setKarigarId}>
-        <SelectTrigger className="h-8 text-sm">
-          <SelectValue placeholder="Select karigar" />
-        </SelectTrigger>
-        <SelectContent>
-          {karigars.map((k) => (
-            <SelectItem key={k.id} value={k.id}>
-              {k.name} — {k.type}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Textarea
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        placeholder="Notes (optional)..."
-        rows={2}
-        className="text-sm"
+    <div className="flex flex-col gap-2 animate-fade-in">
+      <KarigarSplitEditor
+        type={type}
+        targets={targets}
+        karigars={karigars}
+        value={rows}
+        onChange={setRows}
       />
       <div className="flex gap-2 justify-end">
         <Button
@@ -194,8 +237,8 @@ function KarigarAssignPanel({
         >
           Cancel
         </Button>
-        <Button size="sm" className="h-7 text-xs" onClick={handleAssign}>
-          Assign Karigar
+        <Button size="sm" className="h-7 text-xs" onClick={handleSave}>
+          Save Distribution
         </Button>
       </div>
     </div>
@@ -226,6 +269,10 @@ const OrderImageCard = React.forwardRef<
   );
 
   const isWaxKarigar = karigarType === "wax" || !karigarType;
+  const cardTargets = buildSplitTargets(order.items);
+  const cardAssignments = (order.karigarAssignments ?? []).filter(
+    (a) => a.type === (karigarType ?? "wax"),
+  );
 
   return (
     <div
@@ -380,6 +427,63 @@ const OrderImageCard = React.forwardRef<
           </tbody>
         </table>
 
+        {/* Karigar wise distribution for this work type */}
+        {cardAssignments.length > 0 && (
+          <>
+            <div
+              style={{
+                fontSize: "11px",
+                fontWeight: 600,
+                color: "#64748b",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                marginBottom: 8,
+                marginTop: 12,
+              }}
+            >
+              Karigar Distribution
+            </div>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: "11px",
+                background: "#f8fafc",
+              }}
+            >
+              <thead>
+                <tr style={{ background: "#1E3A5F", color: "#fff" }}>
+                  <th style={{ padding: "8px", textAlign: "left", border: "1px solid #1E3A5F" }}>Karigar</th>
+                  <th style={{ padding: "8px", textAlign: "left", border: "1px solid #1E3A5F" }}>Pattern</th>
+                  <th style={{ padding: "8px", textAlign: "center", border: "1px solid #1E3A5F" }}>Pieces</th>
+                  <th style={{ padding: "8px", textAlign: "center", border: "1px solid #1E3A5F" }}>Weight</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cardAssignments.map((a, i) => {
+                  const target = cardTargets.find((t) => t.id === a.itemId);
+                  return (
+                    <tr key={a.id || i} style={{ background: i % 2 === 0 ? "#f8fafc" : "#fff" }}>
+                      <td style={{ padding: "8px", border: "1px solid #e2e8f0", fontWeight: 600 }}>
+                        {a.karigarName || "—"}
+                      </td>
+                      <td style={{ padding: "8px", border: "1px solid #e2e8f0" }}>
+                        {target?.label || "Whole order"}
+                      </td>
+                      <td style={{ padding: "8px", border: "1px solid #e2e8f0", textAlign: "center", fontWeight: 600, color: "#1E3A5F" }}>
+                        {a.allottedPieces.toLocaleString()}
+                      </td>
+                      <td style={{ padding: "8px", border: "1px solid #e2e8f0", textAlign: "center" }}>
+                        {gramsForPieces(target, a.allottedPieces).toFixed(3)} g
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </>
+        )}
+
         {/* Stone Details Table for Stone Karigars */}
         {!isWaxKarigar && order.stoneUsage && order.stoneUsage.length > 0 && (
           <>
@@ -525,12 +629,30 @@ export default function OrderDetailPage() {
     );
 
   const nextStatuses = getNextStatuses(order.status);
-  const waxAssignment = order.karigarAssignments
-    .filter((a) => a.type === "wax")
-    .slice(-1)[0];
-  const stoneAssignment = order.karigarAssignments
-    .filter((a) => a.type === "stone")
-    .slice(-1)[0];
+  const splitTargets = buildSplitTargets(order.items);
+  const waxAssignments = assignmentsOfType(order.karigarAssignments ?? [], "wax");
+  const stoneAssignments = assignmentsOfType(order.karigarAssignments ?? [], "stone");
+  const waxAssignedPieces = waxAssignments.reduce(
+    (sum, a) => sum + (Number(a.allottedPieces) || 0),
+    0,
+  );
+  const stoneAssignedPieces = stoneAssignments.reduce(
+    (sum, a) => sum + (Number(a.allottedPieces) || 0),
+    0,
+  );
+  const totalOrderPieces = splitTargets.reduce((sum, t) => sum + t.pieces, 0);
+
+  const describeKarigarButton = (
+    label: string,
+    assignments: KarigarAssignment[],
+    assignedPieces: number,
+  ) => {
+    if (assignments.length === 0) return `Assign ${label} Karigar`;
+    if (assignments.length === 1) {
+      return `${label}: ${assignments[0].karigarName} (${assignedPieces} pcs)`;
+    }
+    return `${label}: ${assignments.length} karigars (${assignedPieces}/${totalOrderPieces} pcs)`;
+  };
 
   const handleStatusChange = (nextStatus: OrderStatus) => {
     updateOrder(order.id, {
@@ -550,10 +672,34 @@ export default function OrderDetailPage() {
     refresh();
   };
 
+  /**
+   * Decide which karigar chat a work-order image should go to.
+   * One allotment → that karigar's number. A pattern shared by several
+   * karigars is left for the user to pick, so no number is pre-filled.
+   */
+  const resolveWhatsappTarget = (type: "wax" | "stone", itemId?: string) => {
+    const rows = assignmentsOfType(order.karigarAssignments ?? [], type).filter(
+      (a) => !itemId || a.itemId === itemId || a.itemId === "",
+    );
+    const karigarList = getKarigars();
+    if (rows.length <= 1) {
+      const karigar = rows[0]
+        ? karigarList.find((k) => k.id === rows[0].karigarId)
+        : undefined;
+      return {
+        phone: karigar?.whatsapp || karigar?.mobile || "",
+        names: rows.map((r) => r.karigarName),
+        split: false,
+      };
+    }
+    return { phone: "", names: rows.map((r) => r.karigarName), split: true };
+  };
+
   const handleSendWaxWhatsApp = async (item: (typeof order.items)[0]) => {
-    const karigar = order.karigarAssignments.find((a) => a.type === "wax");
-    const phone = karigar
-      ? getKarigars().find((k) => k.id === karigar.karigarId)?.whatsapp || ""
+    const target = resolveWhatsappTarget("wax", item.id);
+    const phone = target.phone;
+    const splitNote = target.split
+      ? ` This pattern is split between ${target.names.join(", ")} — pick the right chat.`
       : "";
 
     // Set karigar type to wax for image generation
@@ -718,9 +864,9 @@ export default function OrderDetailPage() {
         }
 
         if (copied) {
-          toast.success("WhatsApp Web is opening in your default browser. The work order image has been copied to your clipboard. 👉 Click inside the WhatsApp chat box and press CTRL + V (Paste) to send the image.");
+          toast.success(`WhatsApp Web is opening in your default browser. The work order image has been copied to your clipboard. 👉 Click inside the WhatsApp chat box and press CTRL + V (Paste) to send the image.${splitNote}`);
         } else {
-          toast.success("WhatsApp Web is opening in your default browser. Please attach the work order image manually.");
+          toast.success(`WhatsApp Web is opening in your default browser. Please attach the work order image manually.${splitNote}`);
         }
       }, 300);
     } catch (error) {
@@ -733,9 +879,10 @@ export default function OrderDetailPage() {
   };
 
   const handleSendStoneWhatsApp = async (item: (typeof order.items)[0]) => {
-    const karigar = order.karigarAssignments.find((a) => a.type === "stone");
-    const phone = karigar
-      ? getKarigars().find((k) => k.id === karigar.karigarId)?.whatsapp || ""
+    const target = resolveWhatsappTarget("stone", item.id);
+    const phone = target.phone;
+    const splitNote = target.split
+      ? ` This pattern is split between ${target.names.join(", ")} — pick the right chat.`
       : "";
 
     // Set karigar type to stone for image generation
@@ -900,9 +1047,9 @@ export default function OrderDetailPage() {
         }
 
         if (copied) {
-          toast.success("WhatsApp Web is opening in your default browser. The work order image has been copied to your clipboard. 👉 Click inside the WhatsApp chat box and press CTRL + V (Paste) to send the image.");
+          toast.success(`WhatsApp Web is opening in your default browser. The work order image has been copied to your clipboard. 👉 Click inside the WhatsApp chat box and press CTRL + V (Paste) to send the image.${splitNote}`);
         } else {
-          toast.success("WhatsApp Web is opening in your default browser. Please attach the work order image manually.");
+          toast.success(`WhatsApp Web is opening in your default browser. Please attach the work order image manually.${splitNote}`);
         }
       }, 300);
     } catch (error) {
@@ -1064,11 +1211,13 @@ export default function OrderDetailPage() {
       }
 
       // Get appropriate karigar phone number
-      const assignment = order.karigarAssignments.find(a => a.type === targetType);
-      const karigar = assignment
-        ? getKarigars().find(k => k.id === assignment.karigarId)
-        : null;
-      const phone = karigar?.whatsapp || karigar?.mobile || order.customerWhatsapp?.replace(/\D/g, "") || "";
+      const target = resolveWhatsappTarget(targetType);
+      const phone =
+        target.phone ||
+        (target.split ? "" : order.customerWhatsapp?.replace(/\D/g, "") || "");
+      const splitNote = target.split
+        ? ` This order is split between ${target.names.join(", ")} — pick the right chat.`
+        : "";
 
       // Open WhatsApp Web with the correct number
       setTimeout(async () => {
@@ -1094,9 +1243,9 @@ export default function OrderDetailPage() {
         }
 
         if (copied) {
-          toast.success("WhatsApp Web is opening in your default browser. The work order image has been copied to your clipboard. 👉 Click inside the WhatsApp chat box and press CTRL + V (Paste) to send the image.");
+          toast.success(`WhatsApp Web is opening in your default browser. The work order image has been copied to your clipboard. 👉 Click inside the WhatsApp chat box and press CTRL + V (Paste) to send the image.${splitNote}`);
         } else {
-          toast.success("WhatsApp Web is opening in your default browser. Please attach the work order image manually.");
+          toast.success(`WhatsApp Web is opening in your default browser. Please attach the work order image manually.${splitNote}`);
         }
       }, 300);
     } catch (error) {
@@ -1154,6 +1303,47 @@ export default function OrderDetailPage() {
               <MessageCircle size={12} className="mr-1" />
               {generatingImg ? "Generating…" : "Stone"}
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" className="h-7 text-xs">
+                  <FileText size={12} className="mr-1 text-red-500" /> PDF
+                  <ChevronDown size={12} className="ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuLabel className="text-[11px] text-muted-foreground">
+                  Download this order
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => {
+                    generateOrderPdf(order, { workType: "wax", title: "Wax Work Order" });
+                    toast.success("Wax order PDF downloaded");
+                  }}
+                >
+                  <FileText size={13} className="mr-2 text-amber-600" />
+                  Wax Work Order PDF
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => {
+                    generateOrderPdf(order, { workType: "stone", title: "Stone Work Order" });
+                    toast.success("Stone order PDF downloaded");
+                  }}
+                >
+                  <Gem size={13} className="mr-2 text-teal-600" />
+                  Stone Work Order PDF
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => {
+                    generateOrderPdf(order, { workType: "both", title: "Order Details" });
+                    toast.success("Full order PDF downloaded");
+                  }}
+                >
+                  <Package size={13} className="mr-2 text-primary" />
+                  Full Order PDF (Wax + Stone)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               size="sm"
               variant="outline"
@@ -1264,9 +1454,7 @@ export default function OrderDetailPage() {
                       }
                     >
                       <Hammer size={11} className="mr-1" />
-                      {waxAssignment
-                        ? `Wax: ${waxAssignment.karigarName}`
-                        : "Assign Wax Karigar"}
+                      {describeKarigarButton("Wax", waxAssignments, waxAssignedPieces)}
                     </Button>
                   )}
                   {(
@@ -1286,9 +1474,7 @@ export default function OrderDetailPage() {
                       }
                     >
                       <Gem size={11} className="mr-1" />
-                      {stoneAssignment
-                        ? `Stone: ${stoneAssignment.karigarName}`
-                        : "Assign Stone Karigar"}
+                      {describeKarigarButton("Stone", stoneAssignments, stoneAssignedPieces)}
                     </Button>
                   )}
                 </div>
@@ -1505,29 +1691,36 @@ export default function OrderDetailPage() {
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
                   Karigars
                 </p>
-                {order.karigarAssignments.map((a, i) => (
-                  <div key={i} className="flex items-center gap-1.5 mb-1.5">
-                    {a.type === "wax" ? (
-                      <Hammer
-                        size={11}
-                        className="text-muted-foreground shrink-0"
-                      />
-                    ) : (
-                      <Gem
-                        size={11}
-                        className="text-muted-foreground shrink-0"
-                      />
-                    )}
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-medium truncate">
-                        {a.karigarName}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground capitalize">
-                        {a.type} work
-                      </p>
+                {order.karigarAssignments.map((a, i) => {
+                  const target = splitTargets.find((t) => t.id === a.itemId);
+                  return (
+                    <div key={a.id || i} className="flex items-start gap-1.5 mb-1.5">
+                      {a.type === "wax" ? (
+                        <Hammer
+                          size={11}
+                          className="text-muted-foreground shrink-0 mt-0.5"
+                        />
+                      ) : (
+                        <Gem
+                          size={11}
+                          className="text-muted-foreground shrink-0 mt-0.5"
+                        />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] font-medium truncate">
+                          {a.karigarName}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground truncate">
+                          {WORK_TYPE_META[a.type].shortLabel} work
+                          {target ? ` · ${target.label}` : ""}
+                        </p>
+                      </div>
+                      <span className="text-[10px] font-semibold shrink-0">
+                        {describeAllotment(a, splitTargets)}
+                      </span>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 

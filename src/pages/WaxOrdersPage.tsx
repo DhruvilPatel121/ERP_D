@@ -18,6 +18,7 @@ import {
   X,
   Check,
   ChevronRight,
+  ChevronDown,
   ArrowLeft,
   Building2,
   Package,
@@ -26,6 +27,8 @@ import {
   Scale,
   Hash,
   Hammer,
+  Gem,
+  FileText,
 } from "lucide-react";
 import {
   getOrders,
@@ -46,12 +49,23 @@ import {
 } from "@/lib/db";
 import { calculateGramOrder, calculatePieceOrder } from "@/lib/calculations";
 import { formatDate, nanoid } from "@/lib/utils";
-import { ORDER_STATUS_LABELS } from "@/lib/orderStatus";
+import {
+  ORDER_STATUS_LABELS,
+  ORDER_STATUS_COLORS,
+  summarizeStatuses,
+} from "@/lib/orderStatus";
+import {
+  checkStoneAvailability,
+  buildRestockMessage,
+} from "@/lib/stoneAvailability";
+import { generateOrderPdf, generateOrdersPdf } from "@/lib/orderPdf";
 import { PageToolbar } from "@/components/layouts/AppLayout";
 import { SearchInput } from "@/components/common/SearchInput";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Combobox, type ComboboxOption } from "@/components/common/Combobox";
 import { DateRangePicker } from "@/components/common/DateRangePicker";
+import { KarigarSplitEditor } from "@/components/common/KarigarSplitEditor";
+import { splitBalance, type SplitTarget } from "@/lib/karigarSplit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -71,6 +85,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import type {
   Order,
@@ -78,6 +100,7 @@ import type {
   OrderStatus,
   Pattern,
   OrderItemCalculation,
+  KarigarAssignment,
 } from "@/types/erp";
 
 type ViewMode = "list" | "party" | "order" | "new";
@@ -100,7 +123,6 @@ const orderSchema = z.object({
   notes: z.string().default(""),
   touch: z.string().default(""),
   items: z.array(orderItemSchema).min(1, "Add at least one pattern item"),
-  waxKarigarId: z.string().optional(),
 });
 type OrderFormValues = z.infer<typeof orderSchema>;
 
@@ -121,11 +143,15 @@ function OrderItemRow({
 }) {
   const { control, setValue, getValues } = form;
 
-  const patternOptions: ComboboxOption[] = useMemo(() => 
-    patterns
-      .filter((p) => p.isActive)
-      .map((p) => ({ value: p.id, label: `${p.patternNumber} — ${p.patternName}` })),
-    [patterns]
+  const patternOptions: ComboboxOption[] = useMemo(
+    () =>
+      patterns
+        .filter((p) => p.isActive)
+        .map((p) => ({
+          value: p.id,
+          label: `${p.patternNumber} — ${p.patternName}`,
+        })),
+    [patterns],
   );
 
   // Watch the three reactive fields for this row
@@ -390,8 +416,7 @@ function OrderQtyTypeRadio({
       label: "Only Pieces",
       icon: <Hash size={12} />,
       cls: "border-border text-muted-foreground hover:bg-muted/40",
-      activeCls:
-        "border-blue-400 bg-blue-500/12 text-blue-700 font-semibold",
+      activeCls: "border-blue-400 bg-blue-500/12 text-blue-700 font-semibold",
     },
     {
       key: "mixed",
@@ -433,7 +458,9 @@ export default function WaxOrdersPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [yearFilter, setYearFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState("all");
-  const [dateRange, setDateRange] = useState<{ from?: string; to?: string }>({});
+  const [dateRange, setDateRange] = useState<{ from?: string; to?: string }>(
+    {},
+  );
   const [allOrders, setAllOrders] = useState<Order[]>([]);
 
   // Load orders on mount and when view changes
@@ -503,9 +530,7 @@ export default function WaxOrdersPage() {
         !q ||
         o.orderNumber.toLowerCase().includes(q) ||
         o.customerName.toLowerCase().includes(q) ||
-        o.items.some((i) =>
-          i.snapshot.patternNumber.toLowerCase().includes(q),
-        );
+        o.items.some((i) => i.snapshot.patternNumber.toLowerCase().includes(q));
       const matchS = statusFilter === "all" || o.status === statusFilter;
       const matchY = yearFilter === "all" || o.orderDate.startsWith(yearFilter);
       const matchM =
@@ -531,17 +556,15 @@ export default function WaxOrdersPage() {
           s + o.items.reduce((ss, i) => ss + i.calculation.finishedPieces, 0),
         0,
       ),
+      statusSummary: summarizeStatuses(orders),
     }));
   }, [waxOrders, search, statusFilter, yearFilter, monthFilter, dateRange]);
 
-  const handleStatusChange = useCallback(
-    (id: string, status: OrderStatus) => {
-      updateOrder(id, { status });
-      toast.success(`Status updated to ${ORDER_STATUS_LABELS[status]}`);
-      setAllOrders(getOrders());
-    },
-    [],
-  );
+  const handleStatusChange = useCallback((id: string, status: OrderStatus) => {
+    updateOrder(id, { status });
+    toast.success(`Status updated to ${ORDER_STATUS_LABELS[status]}`);
+    setAllOrders(getOrders());
+  }, []);
 
   const handleDelete = useCallback(
     (id: string) => {
@@ -570,14 +593,33 @@ export default function WaxOrdersPage() {
           title="Wax Orders"
           subtitle="Manage wax work orders"
           actions={
-            <Button
-              size="sm"
-              onClick={() => setViewMode("new")}
-              className="h-7 text-xs"
-            >
-              <Plus size={12} className="mr-1" />
-              New Wax Order
-            </Button>
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={filteredOrders.length === 0}
+                onClick={() =>
+                  generateOrdersPdf(filteredOrders, {
+                    workType: "wax",
+                    title: "Wax Work Order",
+                    indexTitle: "Wax Orders Summary",
+                    fileName: `wax-orders-${new Date().toISOString().slice(0, 10)}`,
+                  })
+                }
+                className="h-7 text-xs"
+              >
+                <FileText size={12} className="mr-1 text-red-500" />
+                All Orders PDF ({filteredOrders.length})
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => setViewMode("new")}
+                className="h-7 text-xs"
+              >
+                <Plus size={12} className="mr-1" />
+                New Wax Order
+              </Button>
+            </div>
           }
         />
 
@@ -623,8 +665,13 @@ export default function WaxOrdersPage() {
               <SelectContent>
                 <SelectItem value="all">All Months</SelectItem>
                 {Array.from({ length: 12 }, (_, i) => (
-                  <SelectItem key={i + 1} value={String(i + 1).padStart(2, "0")}>
-                    {new Date(2024, i).toLocaleString("default", { month: "long" })}
+                  <SelectItem
+                    key={i + 1}
+                    value={String(i + 1).padStart(2, "0")}
+                  >
+                    {new Date(2024, i).toLocaleString("default", {
+                      month: "long",
+                    })}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -638,7 +685,7 @@ export default function WaxOrdersPage() {
 
           {/* Party View */}
           <div className="grid gap-2">
-            {partyGroups.map(({ name, orders, totalPieces }) => (
+            {partyGroups.map(({ name, orders, totalPieces, statusSummary }) => (
               <div
                 key={name}
                 className="card-l1 p-3 cursor-pointer hover:bg-muted/50 transition-colors"
@@ -647,15 +694,26 @@ export default function WaxOrdersPage() {
                   setViewMode("party");
                 }}
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <Building2 size={14} className="text-muted-foreground" />
                     <span className="font-medium text-sm">{name}</span>
                     <Badge variant="outline" className="text-[10px] h-4 px-1.5">
                       {orders.length} orders
                     </Badge>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {statusSummary.map((s) => (
+                        <span
+                          key={s.status}
+                          className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${ORDER_STATUS_COLORS[s.status]}`}
+                          title={ORDER_STATUS_LABELS[s.status]}
+                        >
+                          {s.label}: {s.count}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
                     <span>{totalPieces.toLocaleString()} pcs</span>
                     <ChevronRight size={14} />
                   </div>
@@ -681,7 +739,8 @@ export default function WaxOrdersPage() {
             i.snapshot.patternNumber.toLowerCase().includes(q),
           );
         const matchS = statusFilter === "all" || o.status === statusFilter;
-        const matchY = yearFilter === "all" || o.orderDate.startsWith(yearFilter);
+        const matchY =
+          yearFilter === "all" || o.orderDate.startsWith(yearFilter);
         const matchM =
           monthFilter === "all" ||
           o.orderDate.slice(0, 7).endsWith(`-${monthFilter}`);
@@ -696,15 +755,34 @@ export default function WaxOrdersPage() {
           title={selectedParty}
           subtitle={`${partyOrders.length} wax orders`}
           actions={
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setViewMode("list")}
-              className="h-7 text-xs"
-            >
-              <ArrowLeft size={12} className="mr-1" />
-              Back
-            </Button>
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={partyOrders.length === 0}
+                onClick={() =>
+                  generateOrdersPdf(partyOrders, {
+                    workType: "wax",
+                    title: "Wax Work Order",
+                    indexTitle: `${selectedParty} — Wax Orders`,
+                    fileName: `${selectedParty}-wax-${new Date().toISOString().slice(0, 10)}`,
+                  })
+                }
+                className="h-7 text-xs"
+              >
+                <FileText size={12} className="mr-1 text-red-500" />
+                Party PDF ({partyOrders.length})
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setViewMode("list")}
+                className="h-7 text-xs"
+              >
+                <ArrowLeft size={12} className="mr-1" />
+                Back
+              </Button>
+            </div>
           }
         />
 
@@ -750,8 +828,13 @@ export default function WaxOrdersPage() {
               <SelectContent>
                 <SelectItem value="all">All Months</SelectItem>
                 {Array.from({ length: 12 }, (_, i) => (
-                  <SelectItem key={i + 1} value={String(i + 1).padStart(2, "0")}>
-                    {new Date(2024, i).toLocaleString("default", { month: "long" })}
+                  <SelectItem
+                    key={i + 1}
+                    value={String(i + 1).padStart(2, "0")}
+                  >
+                    {new Date(2024, i).toLocaleString("default", {
+                      month: "long",
+                    })}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -778,7 +861,9 @@ export default function WaxOrdersPage() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div>
-                        <div className="font-medium text-sm">{order.orderNumber}</div>
+                        <div className="font-medium text-sm">
+                          {order.orderNumber}
+                        </div>
                         <div className="text-xs text-muted-foreground">
                           {formatDate(order.orderDate)}
                         </div>
@@ -787,7 +872,10 @@ export default function WaxOrdersPage() {
                     </div>
                     <div className="flex items-center gap-3">
                       <StatusBadge status={order.status} />
-                      <ChevronRight size={14} className="text-muted-foreground" />
+                      <ChevronRight
+                        size={14}
+                        className="text-muted-foreground"
+                      />
                     </div>
                   </div>
                 </div>
@@ -835,16 +923,73 @@ export default function WaxOrdersPage() {
                 <SelectContent>
                   <SelectItem value="pending">Pending</SelectItem>
                   <SelectItem value="assigned">Assigned</SelectItem>
-                  <SelectItem value="wax_in_progress">Wax In Progress</SelectItem>
+                  <SelectItem value="wax_in_progress">
+                    Wax In Progress
+                  </SelectItem>
                   <SelectItem value="wax_completed">Wax Completed</SelectItem>
-                  <SelectItem value="stone_setting_pending">Stone Setting Pending</SelectItem>
-                  <SelectItem value="stone_setting_in_progress">Stone Setting In Progress</SelectItem>
-                  <SelectItem value="stone_setting_completed">Stone Setting Completed</SelectItem>
-                  <SelectItem value="production_completed">Production Completed</SelectItem>
+                  <SelectItem value="stone_setting_pending">
+                    Stone Setting Pending
+                  </SelectItem>
+                  <SelectItem value="stone_setting_in_progress">
+                    Stone Setting In Progress
+                  </SelectItem>
+                  <SelectItem value="stone_setting_completed">
+                    Stone Setting Completed
+                  </SelectItem>
+                  <SelectItem value="production_completed">
+                    Production Completed
+                  </SelectItem>
                   <SelectItem value="ready">Ready</SelectItem>
                   <SelectItem value="delivered">Delivered</SelectItem>
                 </SelectContent>
               </Select>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline" className="h-7 text-xs">
+                    <FileText size={12} className="mr-1 text-red-500" /> PDF
+                    <ChevronDown size={12} className="ml-1" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuLabel className="text-[11px] text-muted-foreground">
+                    Download this order
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() =>
+                      generateOrderPdf(selectedOrder, {
+                        workType: "wax",
+                        title: "Wax Work Order",
+                      })
+                    }
+                  >
+                    <Hammer size={13} className="mr-2 text-amber-600" />
+                    Wax Work Order PDF
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() =>
+                      generateOrderPdf(selectedOrder, {
+                        workType: "stone",
+                        title: "Stone Work Order",
+                      })
+                    }
+                  >
+                    <Gem size={13} className="mr-2 text-teal-600" />
+                    Stone Work Order PDF
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() =>
+                      generateOrderPdf(selectedOrder, {
+                        workType: "both",
+                        title: "Order Details",
+                      })
+                    }
+                  >
+                    <Package size={13} className="mr-2 text-primary" />
+                    Full Order PDF (Wax + Stone)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button
                 size="sm"
                 variant="outline"
@@ -865,7 +1010,9 @@ export default function WaxOrdersPage() {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <span className="text-muted-foreground">Customer: </span>
-                  <span className="font-medium">{selectedOrder.customerName}</span>
+                  <span className="font-medium">
+                    {selectedOrder.customerName}
+                  </span>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Status: </span>
@@ -897,10 +1044,14 @@ export default function WaxOrdersPage() {
                     <div className="flex items-center justify-between mb-2">
                       <div>
                         <span className="font-semibold text-xs">
-                          {item.snapshot.patternNumber} — {item.snapshot.patternName}
+                          {item.snapshot.patternNumber} —{" "}
+                          {item.snapshot.patternName}
                         </span>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <Badge variant="outline" className="text-[10px] h-4 px-1.5">
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] h-4 px-1.5"
+                          >
                             {item.quantityType === "grams"
                               ? `${item.orderQuantity}g`
                               : `${item.orderQuantity} pcs`}
@@ -913,7 +1064,9 @@ export default function WaxOrdersPage() {
                     </div>
                     <div className="grid grid-cols-3 gap-2 bg-muted/30 rounded p-2 text-[11px]">
                       <div>
-                        <span className="text-muted-foreground">Wt/Piece: </span>
+                        <span className="text-muted-foreground">
+                          Wt/Piece:{" "}
+                        </span>
                         <strong>{item.snapshot.weightPerPiece}g</strong>
                       </div>
                       <div>
@@ -923,7 +1076,9 @@ export default function WaxOrdersPage() {
                         </strong>
                       </div>
                       <div>
-                        <span className="text-muted-foreground">Wax Trees: </span>
+                        <span className="text-muted-foreground">
+                          Wax Trees:{" "}
+                        </span>
                         <strong>{item.calculation.waxTreesRequired}</strong>
                       </div>
                     </div>
@@ -982,7 +1137,14 @@ export default function WaxOrdersPage() {
 
   // New Order Form
   if (viewMode === "new") {
-    return <WaxOrderFormView onCancel={() => { setViewMode("list"); setAllOrders(getOrders()); }} />;
+    return (
+      <WaxOrderFormView
+        onCancel={() => {
+          setViewMode("list");
+          setAllOrders(getOrders());
+        }}
+      />
+    );
   }
 
   return null;
@@ -995,29 +1157,33 @@ function WaxOrderFormView({ onCancel }: { onCancel: () => void }) {
   const patterns = useMemo(() => getPatterns(), []);
   const appSettings = useMemo(() => getAppSettings(), []);
   const karigars = useMemo(() => getKarigars().filter((k) => k.isActive), []);
-  const waxKarigars = useMemo(() => karigars.filter((k) => k.type === "wax"), [karigars]);
+  const waxKarigars = useMemo(
+    () => karigars.filter((k) => k.type === "wax"),
+    [karigars],
+  );
   const microDiamonds = useMemo(() => getMicroDiamonds(), []);
   const adDiamonds = useMemo(() => getADDiamonds(), []);
 
   // Helper functions for stone matching
   const normalizeSize = (size: string) => {
-    if (!size) return '';
-    return size.toLowerCase()
-      .replace(/×/g, 'x')
-      .replace(/\*/g, 'x')
-      .replace(/\s*x\s*/g, 'x')
-      .replace(/\s+/g, '')
+    if (!size) return "";
+    return size
+      .toLowerCase()
+      .replace(/×/g, "x")
+      .replace(/\*/g, "x")
+      .replace(/\s*x\s*/g, "x")
+      .replace(/\s+/g, "")
       .trim();
   };
 
   const normalizeShape = (shape: string) => {
-    if (!shape) return '';
+    if (!shape) return "";
     return shape.toLowerCase().trim();
   };
 
-  const customerOptions: ComboboxOption[] = useMemo(() =>
-    customers.map((c) => ({ value: c.id, label: c.partyName })),
-    [customers]
+  const customerOptions: ComboboxOption[] = useMemo(
+    () => customers.map((c) => ({ value: c.id, label: c.partyName })),
+    [customers],
   );
 
   const form = useForm<OrderFormValues>({
@@ -1029,7 +1195,6 @@ function WaxOrderFormView({ onCancel }: { onCancel: () => void }) {
       notes: "",
       touch: "",
       items: [],
-      waxKarigarId: "",
     },
   });
 
@@ -1038,42 +1203,64 @@ function WaxOrderFormView({ onCancel }: { onCancel: () => void }) {
     name: "items",
   });
 
-  // Filter karigars based on selected patterns using dice ranges
-  const selectedPatternIds = useWatch({ control: form.control, name: "items" }) as any[];
-  const waxKarigarId = useWatch({ control: form.control, name: "waxKarigarId" });
-  
-  const filteredWaxKarigars = useMemo(() => {
-    if (!selectedPatternIds || selectedPatternIds.length === 0) return waxKarigars;
-    
-    // Get pattern numbers from selected patterns
-    const patternNumbers = selectedPatternIds
-      .filter((item) => item.patternId)
-      .map((item) => {
+  // One order can be handed to several karigars, each with its own quantity
+  const [waxAssignments, setWaxAssignments] = useState<KarigarAssignment[]>([]);
+
+  const selectedPatternIds = useWatch({
+    control: form.control,
+    name: "items",
+  }) as any[];
+
+  /** Order items shaped for the distribution editor (live, straight from the form) */
+  const splitTargets: SplitTarget[] = useMemo(() => {
+    return (selectedPatternIds ?? [])
+      .filter((item) => item && item.patternId)
+      .map((item, index) => {
         const pattern = patterns.find((p) => p.id === item.patternId);
-        return pattern?.patternNumber || "";
+        const snapshot = item.snapshot ?? pattern;
+        const patternNumber =
+          snapshot?.patternNumber ||
+          pattern?.patternNumber ||
+          `Item ${index + 1}`;
+        const patternName = snapshot?.patternName || pattern?.patternName || "";
+        return {
+          id: item.id as string,
+          label: patternName
+            ? `${patternNumber} — ${patternName}`
+            : patternNumber,
+          pieces: item.calculationCache?.finishedPieces ?? 0,
+          weightPerPiece:
+            snapshot?.weightPerPiece ?? pattern?.weightPerPiece ?? 0,
+          treeSize: snapshot?.treeSize ?? pattern?.treeSize ?? 0,
+        };
       });
+  }, [selectedPatternIds, patterns]);
 
-    if (patternNumbers.length === 0) return waxKarigars;
+  /** Live stone availability for the items currently in the form */
+  const stoneAvailability = useMemo(() => {
+    const liveItems: OrderItem[] = (selectedPatternIds ?? [])
+      .filter((item) => item && item.patternId && item.calculationCache)
+      .map((item) => ({
+        id: item.id as string,
+        patternId: item.patternId,
+        snapshot: item.snapshot ?? {},
+        quantityType: item.quantityType,
+        orderQuantity: item.orderQuantity,
+        calculation: item.calculationCache as OrderItemCalculation,
+        status: "pending",
+        notes: item.notes ?? "",
+      }));
+    return checkStoneAvailability(liveItems, microDiamonds, adDiamonds);
+  }, [selectedPatternIds, microDiamonds, adDiamonds]);
 
-    // Find karigars assigned to these pattern numbers via dice ranges
-    const assignedKarigarIds = new Set<string>();
-    patternNumbers.forEach((patternNumber) => {
-      const range = findKarigarForPattern(patternNumber);
-      if (range) {
-        assignedKarigarIds.add(range.karigarId);
-      }
-    });
-
-    // If no dice ranges match, show all karigars
-    if (assignedKarigarIds.size === 0) return waxKarigars;
-
-    // Filter to only show assigned karigars
-    return waxKarigars.filter((k) => assignedKarigarIds.has(k.id));
-  }, [selectedPatternIds, waxKarigars, patterns]);
-
-  const waxKarigarOptions: ComboboxOption[] = useMemo(() => 
-    filteredWaxKarigars.map((k) => ({ value: k.id, label: k.name })),
-    [filteredWaxKarigars]
+  /** Pattern dice range suggestion used when a karigar row is added */
+  const suggestWaxKarigarForItem = useCallback(
+    (itemId: string) => {
+      const target = splitTargets.find((t) => t.id === itemId);
+      const patternNumber = target?.label.split(" — ")[0] ?? "";
+      return findKarigarForPattern(patternNumber)?.karigarId ?? "";
+    },
+    [splitTargets],
   );
 
   const onSubmit: SubmitHandler<OrderFormValues> = (data) => {
@@ -1082,6 +1269,9 @@ function WaxOrderFormView({ onCancel }: { onCancel: () => void }) {
       toast.error("Customer not found");
       return;
     }
+
+    // Form rows get a fresh stored id — remember the mapping so allotments follow
+    const itemIdMap = new Map<string, string>();
 
     const items: OrderItem[] = data.items.map((item) => {
       const pattern = patterns.find((p) => p.id === item.patternId)!;
@@ -1115,8 +1305,11 @@ function WaxOrderFormView({ onCancel }: { onCancel: () => void }) {
         totalStonesPerPiece: pattern.totalStonesPerPiece,
       };
 
+      const storedItemId = nanoid();
+      itemIdMap.set(item.id, storedItemId);
+
       return {
-        id: nanoid(),
+        id: storedItemId,
         patternId: item.patternId,
         snapshot,
         quantityType: item.quantityType,
@@ -1127,6 +1320,20 @@ function WaxOrderFormView({ onCancel }: { onCancel: () => void }) {
       };
     });
 
+    // ── Stone availability check ──────────────────────────────────────────────
+    // Block order creation if any required stone (micro / AD diamond) is short.
+    const availability = checkStoneAvailability(
+      items,
+      microDiamonds,
+      adDiamonds,
+    );
+    if (!availability.ok) {
+      toast.error(
+        `Cannot create order — insufficient stones.\n${buildRestockMessage(availability)}`,
+      );
+      return;
+    }
+
     // Track stone usage for this order
     const stoneUsage: any[] = [];
 
@@ -1135,66 +1342,99 @@ function WaxOrderFormView({ onCancel }: { onCancel: () => void }) {
       if (item.calculation && item.calculation.stoneRequirements) {
         for (const stoneReq of item.calculation.stoneRequirements) {
           if (stoneReq.stoneType === "micro") {
-            const micro = microDiamonds.find((m) => 
-              normalizeSize(m.size) === normalizeSize(stoneReq.stoneSize) &&
-              m.isActive !== false
+            const micro = microDiamonds.find(
+              (m) =>
+                normalizeSize(m.size) === normalizeSize(stoneReq.stoneSize) &&
+                m.isActive !== false,
             );
             if (micro && (micro.quantity || 0) >= stoneReq.requiredQty) {
               const stones = getMicroDiamonds();
               const idx = stones.findIndex((s) => s.id === micro.id);
               if (idx >= 0) {
-                stones[idx] = { 
-                  ...stones[idx], 
+                stones[idx] = {
+                  ...stones[idx],
                   quantity: (micro.quantity || 0) - stoneReq.requiredQty,
-                  updatedAt: new Date().toISOString()
+                  updatedAt: new Date().toISOString(),
                 };
                 saveMicroDiamonds(stones);
               }
-              
+
               stoneUsage.push({
-                stoneType: 'micro',
+                stoneType: "micro",
                 stoneId: micro.id,
                 stoneName: `${micro.size}mm`,
+                stoneSize: micro.size,
                 quantityUsed: stoneReq.requiredQty,
                 itemId: item.id,
               });
             } else {
-              console.warn(`Insufficient ${stoneReq.stoneSize}mm micro diamonds`);
+              console.warn(
+                `Insufficient ${stoneReq.stoneSize}mm micro diamonds`,
+              );
             }
           } else if (stoneReq.stoneType === "ad") {
-            let foundAd = adDiamonds.find((a) => 
-              normalizeSize(a.size) === normalizeSize(stoneReq.stoneSize) &&
-              normalizeShape(a.shape) === normalizeShape(stoneReq.shape) &&
-              a.isActive !== false &&
-              (a.quantity || 0) > 0
+            let foundAd = adDiamonds.find(
+              (a) =>
+                normalizeSize(a.size) === normalizeSize(stoneReq.stoneSize) &&
+                normalizeShape(a.shape) === normalizeShape(stoneReq.shape) &&
+                a.isActive !== false &&
+                (a.quantity || 0) > 0,
             );
-            
+
             if (foundAd && (foundAd.quantity || 0) >= stoneReq.requiredQty) {
               const stones = getADDiamonds();
               const idx = stones.findIndex((s) => s.id === foundAd.id);
               if (idx >= 0) {
-                stones[idx] = { 
-                  ...stones[idx], 
+                stones[idx] = {
+                  ...stones[idx],
                   quantity: (foundAd.quantity || 0) - stoneReq.requiredQty,
-                  updatedAt: new Date().toISOString()
+                  updatedAt: new Date().toISOString(),
                 };
                 saveADDiamonds(stones);
               }
-              
+
               stoneUsage.push({
-                stoneType: 'ad',
+                stoneType: "ad",
                 stoneId: foundAd.id,
                 stoneName: `${foundAd.shape} ${foundAd.size}`,
+                stoneSize: foundAd.size,
                 quantityUsed: stoneReq.requiredQty,
                 itemId: item.id,
               });
             } else {
-              console.warn(`Insufficient ${stoneReq.shape} ${stoneReq.stoneSize} AD diamonds`);
+              console.warn(
+                `Insufficient ${stoneReq.shape} ${stoneReq.stoneSize} AD diamonds`,
+              );
             }
           }
         }
       }
     }
+
+    // Distribute the order across the karigars chosen in the editor
+    const balance = splitBalance(splitTargets, waxAssignments, "wax", "");
+    if (balance.overAllocated) {
+      toast.error(
+        `Wax distribution exceeds the order by ${balance.totalAllotted - balance.totalRequired} pcs. Please adjust the quantities.`,
+      );
+      return;
+    }
+    if (waxAssignments.some((a) => !a.karigarId)) {
+      toast.error("Every wax allotment needs a karigar.");
+      return;
+    }
+    if (balance.unallocated > 0) {
+      toast.warning(
+        `${balance.unallocated} pcs were left without a wax karigar and can be assigned later.`,
+      );
+    }
+
+    const karigarAssignments: KarigarAssignment[] = waxAssignments.map((a) => ({
+      ...a,
+      id: nanoid(),
+      itemId: a.itemId ? (itemIdMap.get(a.itemId) ?? "") : "",
+      assignedAt: new Date().toISOString(),
+    }));
 
     const order: Order = {
       id: nanoid(),
@@ -1205,7 +1445,7 @@ function WaxOrderFormView({ onCancel }: { onCancel: () => void }) {
       customerWhatsapp: customer.whatsapp,
       orderType: data.orderQuantityType,
       items,
-      status: "pending",
+      status: karigarAssignments.length > 0 ? "assigned" : "pending",
       statusHistory: [
         {
           status: "pending",
@@ -1214,17 +1454,8 @@ function WaxOrderFormView({ onCancel }: { onCancel: () => void }) {
           notes: "Order created",
         },
       ],
-      karigarAssignments: data.waxKarigarId
-        ? [
-            {
-              type: "wax",
-              karigarId: data.waxKarigarId,
-              karigarName: waxKarigars.find((k) => k.id === data.waxKarigarId)?.name || "",
-              assignedAt: new Date().toISOString(),
-              notes: "",
-            },
-          ]
-        : [],
+      karigarAssignments,
+      attachments: [],
       notes: data.notes,
       touch: data.touch,
       orderDate: data.orderDate,
@@ -1320,38 +1551,21 @@ function WaxOrderFormView({ onCancel }: { onCancel: () => void }) {
                   name="touch"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs">Touch (optional)</FormLabel>
+                      <FormLabel className="text-xs">
+                        Touch (optional)
+                      </FormLabel>
                       <FormControl>
-                        <Input {...field} placeholder="e.g., 14" className="h-8 text-xs" />
+                        <Input
+                          {...field}
+                          placeholder="e.g., 14"
+                          className="h-8 text-xs"
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
               </div>
-            </div>
-
-            {/* Wax Karigar Assignment */}
-            <div className="card-l1 p-3">
-              <FormField
-                control={form.control}
-                name="waxKarigarId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="text-xs">Assign Wax Karigar (optional)</FormLabel>
-                    <FormControl>
-                      <Combobox
-                        options={waxKarigarOptions}
-                        value={field.value}
-                        onChange={field.onChange}
-                        placeholder="Select karigar"
-                        className="h-8 text-xs"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
             </div>
 
             {/* Order Items */}
@@ -1398,13 +1612,27 @@ function WaxOrderFormView({ onCancel }: { onCancel: () => void }) {
                   <table className="w-full border-collapse">
                     <thead>
                       <tr className="bg-muted/50 border-b border-border">
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border">Pattern</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-32">Type</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-28">Quantity</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-28">Fin. Pcs / Wt</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-20">Trees</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-28">Stones</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-32">Notes</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border">
+                          Pattern
+                        </th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-32">
+                          Type
+                        </th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-28">
+                          Quantity
+                        </th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-28">
+                          Fin. Pcs / Wt
+                        </th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-20">
+                          Trees
+                        </th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-28">
+                          Stones
+                        </th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-32">
+                          Notes
+                        </th>
                         <th className="px-3 py-2 text-center text-xs font-semibold text-foreground w-10"></th>
                       </tr>
                     </thead>
@@ -1425,6 +1653,50 @@ function WaxOrderFormView({ onCancel }: { onCancel: () => void }) {
               )}
             </div>
 
+            {/* Stone availability warning */}
+            {!stoneAvailability.ok && (
+              <div className="card-l1 p-3 border-l-4 border-l-amber-500 bg-amber-50/60">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle
+                    size={16}
+                    className="text-amber-600 mt-0.5 shrink-0"
+                  />
+                  <div className="flex-1">
+                    <p className="text-xs font-semibold text-amber-800 mb-1">
+                      Insufficient stones — order cannot be created until these
+                      are restocked:
+                    </p>
+                    <ul className="text-[11px] text-amber-900 space-y-0.5">
+                      {stoneAvailability.insufficient.map((s, idx) => (
+                        <li key={idx}>
+                          <strong>
+                            {s.stoneType === "micro"
+                              ? `Micro ${s.stoneName}`
+                              : `AD ${s.stoneName}`}
+                          </strong>
+                          : need {s.requiredQty.toLocaleString()}, only{" "}
+                          {s.availableQty.toLocaleString()} in stock (short by{" "}
+                          {s.shortBy.toLocaleString()})
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Wax Karigar Distribution */}
+            <div className="card-l1 p-3">
+              <KarigarSplitEditor
+                type="wax"
+                targets={splitTargets}
+                karigars={waxKarigars}
+                value={waxAssignments}
+                onChange={setWaxAssignments}
+                suggestedKarigarId={suggestWaxKarigarForItem}
+              />
+            </div>
+
             {/* Notes */}
             <div className="card-l1 p-3">
               <FormField
@@ -1432,9 +1704,15 @@ function WaxOrderFormView({ onCancel }: { onCancel: () => void }) {
                 name="notes"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-xs">Order Notes (optional)</FormLabel>
+                    <FormLabel className="text-xs">
+                      Order Notes (optional)
+                    </FormLabel>
                     <FormControl>
-                      <Textarea {...field} placeholder="Add any notes about this order..." className="h-20 text-xs resize-none" />
+                      <Textarea
+                        {...field}
+                        placeholder="Add any notes about this order..."
+                        className="h-20 text-xs resize-none"
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

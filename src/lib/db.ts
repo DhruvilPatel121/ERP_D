@@ -646,7 +646,54 @@ export function searchPatterns(query: string): Pattern[] {
 // ── Orders ────────────────────────────────────────────────────────────────────
 
 export function getOrders(): Order[] {
-  return load<Order[]>(KEYS.orders, []);
+  return load<Order[]>(KEYS.orders, []).map(migrateOrderAssignments);
+}
+
+/**
+ * Older records stored a single karigar per work type without any quantity.
+ * Fill the missing split fields so the distribution UI always has real values.
+ * Legacy rows are treated as "this karigar produced the whole order".
+ */
+function migrateOrderAssignments(order: Order): Order {
+  const assignments = order.karigarAssignments ?? [];
+  if (assignments.length === 0) return order;
+
+  const orderPieces = (order.items ?? []).reduce(
+    (sum, item) => sum + (item.calculation?.finishedPieces ?? 0),
+    0,
+  );
+  const singleItemId = order.items?.length === 1 ? order.items[0].id : '';
+
+  let changed = false;
+  const migrated = assignments.map((a, index) => {
+    const legacy = a.allottedPieces === undefined || a.allottedPieces === null;
+    const itemId = a.itemId ?? singleItemId;
+    const pieces = legacy ? orderPieces : a.allottedPieces;
+    const target = (order.items ?? []).find((i) => i.id === itemId);
+    const grams =
+      a.allottedGrams ??
+      Math.round(pieces * (target?.snapshot?.weightPerPiece ?? 0) * 1000) / 1000;
+
+    if (
+      a.id &&
+      !legacy &&
+      a.itemId !== undefined &&
+      a.allottedGrams !== undefined
+    ) {
+      return a;
+    }
+
+    changed = true;
+    return {
+      ...a,
+      id: a.id || `asg-${order.id}-${index}`,
+      itemId,
+      allottedPieces: pieces,
+      allottedGrams: grams,
+    };
+  });
+
+  return changed ? { ...order, karigarAssignments: migrated } : order;
 }
 
 export function saveOrders(orders: Order[]): void {
@@ -805,6 +852,33 @@ export function deleteOrder(id: ID): void {
 
   // Delete the order
   saveOrders(getOrders().filter((o) => o.id !== id));
+  logActivity('order_deleted', `Order "${order.orderNumber}" deleted`, id, 'order');
+  
+  // Renumber all orders to keep them sequential
+  renumberOrders();
+}
+
+// Renumber all orders to maintain sequential numbering
+export function renumberOrders(): void {
+  const orders = getOrders();
+  const settings = getAppSettings();
+  const year = new Date().getFullYear();
+  
+  // Sort orders by creation date to maintain chronological order
+  const sortedOrders = [...orders].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  
+  // Update order numbers sequentially
+  sortedOrders.forEach((order, index) => {
+    order.orderNumber = `${settings.orderNumberPrefix}-${year}-${String(index + 1).padStart(4, '0')}`;
+    order.updatedAt = now();
+  });
+  
+  // Update the counter to match the current number of orders
+  settings.orderNumberCounter = sortedOrders.length;
+  saveAppSettings(settings);
+  
+  // Save the updated orders
+  saveOrders(sortedOrders);
 }
 
 export function getOrderById(id: ID): Order | undefined {

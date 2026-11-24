@@ -120,6 +120,7 @@ type ViewMode =
   | "micro-add"
   | "micro-edit"
   | "ad-shapes"
+  | "ad-colors"
   | "ad-sizes"
   | "ad-detail"
   | "ad-add"
@@ -631,11 +632,13 @@ function ADDiamondFormPage({
   onSave,
   onCancel,
   selectedShape,
+  selectedColor,
 }: {
   stone?: any;
   onSave: () => void;
   onCancel: () => void;
   selectedShape?: any;
+  selectedColor?: string;
 }) {
   const shapes = getADShapes();
   const [restockAmount, setRestockAmount] = useState(0);
@@ -654,7 +657,7 @@ function ADDiamondFormPage({
         }
       : { 
           shapeId: selectedShape?.id?.toString() || "",
-          color: "",
+          color: selectedColor || "",
           isActive: true, 
           quantity: 0, 
           weight: 0, 
@@ -669,6 +672,21 @@ function ADDiamondFormPage({
       const weight = Number(v.weight) || 0;
       const pricePerPiece = Number(v.pricePerPiece) || 0;
       const restock = Number(restockAmount) || 0;
+
+      // Check for duplicate size+color combination
+      const allADDiamonds = getADDiamonds();
+      const duplicate = allADDiamonds.find(
+        (d) =>
+          d.shape_id === parseInt(v.shapeId) &&
+          d.size === v.size &&
+          d.color === (v.color || "") &&
+          d.id !== stone?.id
+      );
+
+      if (duplicate) {
+        toast.error(`This size and color combination already exists for this shape`);
+        return;
+      }
 
       if (stone) {
         // If restocking, add to both quantity and totalQuantity
@@ -760,21 +778,27 @@ function ADDiamondFormPage({
                     name="shapeId"
                     render={({ field }) => (
                       <FormItem>
-                        <Select
-                          value={field.value}
-                          onValueChange={field.onChange}
-                        >
-                          <SelectTrigger className="h-8 text-sm">
-                            <SelectValue placeholder="Select shape" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {shapes.map((s) => (
-                              <SelectItem key={s.id} value={s.id.toString()}>
-                                {s.shape}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        {selectedShape ? (
+                          <div className="h-8 flex items-center text-sm font-medium">
+                            {selectedShape.shape}
+                          </div>
+                        ) : (
+                          <Select
+                            value={field.value}
+                            onValueChange={field.onChange}
+                          >
+                            <SelectTrigger className="h-8 text-sm">
+                              <SelectValue placeholder="Select shape" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {shapes.map((s) => (
+                                <SelectItem key={s.id} value={s.id.toString()}>
+                                  {s.shape}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
                         <FormMessage />
                       </FormItem>
                     )}
@@ -804,13 +828,19 @@ function ADDiamondFormPage({
                     name="color"
                     render={({ field }) => (
                       <FormItem>
-                        <FormControl>
-                          <Input
-                            {...field}
-                            placeholder="e.g., D, E, F, VVS"
-                            className="h-8 text-sm"
-                          />
-                        </FormControl>
+                        {selectedColor ? (
+                          <div className="h-8 flex items-center text-sm font-medium">
+                            {selectedColor}
+                          </div>
+                        ) : (
+                          <FormControl>
+                            <Input
+                              {...field}
+                              placeholder="e.g., D, E, F, VVS"
+                              className="h-8 text-sm"
+                            />
+                          </FormControl>
+                        )}
                         <FormMessage />
                       </FormItem>
                     )}
@@ -1623,7 +1653,8 @@ function ADShapesPage({
   );
 }
 
-function ADSizesPage({
+// ── AD Colors Page ───────────────────────────────────────────────────────
+function ADColorsPage({
   shape,
   onAdd,
   onSelect,
@@ -1632,12 +1663,164 @@ function ADSizesPage({
 }: {
   shape: any;
   onAdd: () => void;
+  onSelect: (color: string) => void;
+  onBack: () => void;
+  forceReload?: number;
+}) {
+  const allADDiamonds = getADDiamonds();
+  const diamonds = allADDiamonds.filter((d) => d.shape_id === shape.id);
+  
+  // Get unique colors for this shape
+  const colors = useMemo(() => {
+    const colorSet = new Set<string>();
+    diamonds.forEach((d) => {
+      if (d.color && d.color.trim()) {
+        colorSet.add(d.color.trim());
+      }
+    });
+    return Array.from(colorSet).sort();
+  }, [diamonds]);
+
+  const [search, setSearch] = useState("");
+  const [showAddColor, setShowAddColor] = useState(false);
+  const [newColorName, setNewColorName] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return colors.filter((c) => !q || c.toLowerCase().includes(q));
+  }, [colors, search]);
+
+  const handleAddColor = () => {
+    if (!newColorName.trim()) {
+      toast.error("Please enter a color name");
+      return;
+    }
+    if (colors.includes(newColorName.trim())) {
+      toast.error("This color already exists");
+      return;
+    }
+    onSelect(newColorName.trim());
+    setShowAddColor(false);
+    setNewColorName("");
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      <PageToolbar
+        breadcrumbs={[
+          { label: "Stones", onClick: onBack },
+          { label: "AD Diamond", onClick: onBack },
+          { label: shape.shape },
+        ]}
+        title={`${shape.shape} Colors`}
+        subtitle={`${colors.length} colors`}
+        actions={
+          <Button size="sm" className="h-7 text-xs" onClick={() => setShowAddColor(true)}>
+            <Plus size={12} className="mr-1" />
+            Add Color
+          </Button>
+        }
+      />
+
+      {/* Add Color Dialog */}
+      {showAddColor && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="card-l1 p-6 w-full max-w-md">
+            <h3 className="text-sm font-semibold mb-4">Add New Color</h3>
+            <Input
+              value={newColorName}
+              onChange={(e) => setNewColorName(e.target.value)}
+              placeholder="Enter color name (e.g., Red, Blue, Green)"
+              className="h-8 text-sm mb-4"
+              autoFocus
+            />
+            <div className="flex gap-2 justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                onClick={() => {
+                  setShowAddColor(false);
+                  setNewColorName("");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button size="sm" className="h-7 text-xs" onClick={handleAddColor}>
+                Add Color
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="erp-toolbar border-b border-border bg-background">
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Search colors…"
+          className="w-56 h-7 text-xs"
+        />
+        <span className="ml-auto text-xs text-muted-foreground">
+          {filtered.length} color{filtered.length !== 1 ? "s" : ""}
+        </span>
+      </div>
+
+      <div className="erp-content">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 p-4">
+          {filtered.length === 0 ? (
+            <div className="col-span-full py-16 text-center text-sm text-muted-foreground">
+              {search ? "No colors match your search." : "No colors yet for this shape. Click \"Add Color\" to create one."}
+            </div>
+          ) : (
+            filtered.map((color) => (
+              <div
+                key={color}
+                className="card-l1 p-4 cursor-pointer hover:border-accent/50 transition-colors group"
+                onClick={() => onSelect(color)}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-accent/20 to-accent/5 flex items-center justify-center shrink-0">
+                    <Gem size={18} className="text-accent" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm text-primary truncate">
+                      {color}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {diamonds.filter((d) => d.color === color).length} sizes
+                    </div>
+                  </div>
+                  <ChevronRight size={14} className="text-muted-foreground" />
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ADSizesPage({
+  shape,
+  color,
+  onAdd,
+  onSelect,
+  onBack,
+  forceReload,
+}: {
+  shape: any;
+  color?: string;
+  onAdd: () => void;
   onSelect: (size: any) => void;
   onBack: () => void;
   forceReload?: number;
 }) {
   const allADDiamonds = getADDiamonds();
-  const sizes = allADDiamonds.filter((d) => d.shape_id === shape.id);
+  const sizes = allADDiamonds.filter((d) => 
+    d.shape_id === shape.id && (!color || d.color === color)
+  );
   const [search, setSearch] = useState("");
   const [showRestock, setShowRestock] = useState(false);
   const [selectedStone, setSelectedStone] = useState<any>(null);
@@ -1689,8 +1872,9 @@ function ADSizesPage({
           { label: "Stones", onClick: onBack },
           { label: "AD Diamond", onClick: onBack },
           { label: shape.shape },
+          ...(color ? [{ label: color }] : []),
         ]}
-        title={`${shape.shape} Sizes`}
+        title={`${color ? `${color} - ` : ""}${shape.shape} Sizes`}
         subtitle={`${sizes.length} sizes`}
         actions={
           <div className="flex gap-2">
@@ -1913,6 +2097,7 @@ export default function StonesPage() {
   const [selectedMicro, setSelectedMicro] = useState<any>(undefined);
   const [selectedAD, setSelectedAD] = useState<any>(undefined);
   const [selectedShape, setSelectedShape] = useState<any>(undefined);
+  const [selectedColor, setSelectedColor] = useState<string | undefined>(undefined);
   const [reloadCounter, setReloadCounter] = useState(0);
 
   const handleSavedMicro = () => {
@@ -1982,8 +2167,9 @@ export default function StonesPage() {
     return (
       <ADDiamondFormPage
         selectedShape={selectedShape}
+        selectedColor={selectedColor}
         onSave={handleSavedAD}
-        onCancel={() => selectedShape ? setView("ad-sizes") : setView("ad-shapes")}
+        onCancel={() => selectedColor ? setView("ad-sizes") : selectedShape ? setView("ad-colors") : setView("ad-shapes")}
       />
     );
   if (view === "ad-edit")
@@ -1991,6 +2177,7 @@ export default function StonesPage() {
       <ADDiamondFormPage
         stone={selectedAD}
         selectedShape={selectedShape}
+        selectedColor={selectedColor}
         onSave={handleSavedAD}
         onCancel={() => setView("ad-detail")}
       />
@@ -2022,26 +2209,45 @@ export default function StonesPage() {
         forceReload={reloadCounter}
         onAdd={() => {
           setSelectedShape(undefined);
+          setSelectedColor(undefined);
           setView("ad-add");
         }}
         onSelect={(s) => {
           setSelectedShape(s);
-          setView("ad-sizes");
+          setSelectedColor(undefined);
+          setView("ad-colors");
         }}
         onBack={() => setView("landing")}
+      />
+    );
+  if (view === "ad-colors" && selectedShape)
+    return (
+      <ADColorsPage
+        shape={selectedShape}
+        forceReload={reloadCounter}
+        onAdd={() => {
+          setSelectedColor(undefined);
+          setView("ad-add");
+        }}
+        onSelect={(color) => {
+          setSelectedColor(color);
+          setView("ad-sizes");
+        }}
+        onBack={() => setView("ad-shapes")}
       />
     );
   if (view === "ad-sizes" && selectedShape)
     return (
       <ADSizesPage
         shape={selectedShape}
+        color={selectedColor}
         forceReload={reloadCounter}
         onAdd={() => setView("ad-add")}
         onSelect={(s) => {
           setSelectedAD(s);
           setView("ad-detail");
         }}
-        onBack={() => setView("ad-shapes")}
+        onBack={() => selectedColor ? setView("ad-colors") : setView("ad-shapes")}
       />
     );
 

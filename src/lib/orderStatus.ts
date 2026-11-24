@@ -57,3 +57,39 @@ export function getNextStatuses(current: OrderStatus): OrderStatus[] {
 export function isTerminalStatus(status: OrderStatus): boolean {
   return status === 'delivered' || status === 'cancelled';
 }
+
+/** Short labels used in compact status pills (e.g. per-customer summaries) */
+export const ORDER_STATUS_SHORT_LABELS: Record<OrderStatus, string> = {
+  draft: 'Draft',
+  confirmed: 'Confirmed',
+  pending: 'Pending',
+  assigned: 'Assigned',
+  wax_in_progress: 'Wax',
+  wax_completed: 'Wax Done',
+  stone_setting_pending: 'Stone Pend',
+  stone_setting_in_progress: 'Stone',
+  stone_setting_completed: 'Stone Done',
+  production_completed: 'Prod Done',
+  ready: 'Ready',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+};
+
+/**
+ * Count orders by status, returning only statuses that are present, in flow
+ * order. Used to render a quick "Pending: 2 · Assigned: 1" summary next to a
+ * customer name.
+ */
+export function summarizeStatuses(
+  orders: { status: OrderStatus }[],
+): { status: OrderStatus; label: string; count: number }[] {
+  const counts: Partial<Record<OrderStatus, number>> = {};
+  orders.forEach((o) => {
+    counts[o.status] = (counts[o.status] ?? 0) + 1;
+  });
+  return ORDER_STATUS_FLOW.filter((s) => (counts[s] ?? 0) > 0).map((s) => ({
+    status: s,
+    label: ORDER_STATUS_SHORT_LABELS[s],
+    count: counts[s] as number,
+  }));
+}

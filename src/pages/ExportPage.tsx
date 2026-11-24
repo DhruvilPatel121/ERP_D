@@ -13,6 +13,11 @@ import * as XLSX from "xlsx";
 import { getOrders, getCustomers, getPatterns, getKarigars } from "@/lib/db";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { ORDER_STATUS_LABELS } from "@/lib/orderStatus";
+import {
+  assignmentsOfType,
+  buildSplitTargets,
+  describeAllotment,
+} from "@/lib/karigarSplit";
 import { PageToolbar } from "@/components/layouts/AppLayout";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -24,7 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import type { Order } from "@/types/erp";
+import type { KarigarAssignment, Order } from "@/types/erp";
 
 type ExportType =
   | "orders"
@@ -108,19 +113,26 @@ function getProductionData() {
   return getOrders()
     .filter((o) => productionStatuses.includes(o.status))
     .map((o) => {
-      const waxK = o.karigarAssignments
-        .filter((a) => a.type === "wax")
-        .slice(-1)[0];
-      const stoneK = o.karigarAssignments
-        .filter((a) => a.type === "stone")
-        .slice(-1)[0];
+      const targets = buildSplitTargets(o.items);
+      const waxRows = assignmentsOfType(o.karigarAssignments, "wax");
+      const stoneRows = assignmentsOfType(o.karigarAssignments, "stone");
+      const joinRows = (rows: KarigarAssignment[]) =>
+        rows.length === 0
+          ? "-"
+          : rows
+              .map((a) => `${a.karigarName} (${describeAllotment(a, targets)})`)
+              .join("; ");
+      const sumPieces = (rows: KarigarAssignment[]) =>
+        rows.reduce((s, a) => s + (Number(a.allottedPieces) || 0), 0);
       return {
         "Order #": o.orderNumber,
         Customer: o.customerName,
         "Order Date": formatDate(o.orderDate),
         Status: ORDER_STATUS_LABELS[o.status] || o.status,
-        "Wax Karigar": waxK?.karigarName || "-",
-        "Stone Karigar": stoneK?.karigarName || "-",
+        "Wax Karigar": joinRows(waxRows),
+        "Wax Distributed (pcs)": sumPieces(waxRows),
+        "Stone Karigar": joinRows(stoneRows),
+        "Stone Distributed (pcs)": sumPieces(stoneRows),
         "Total Trees": o.items.reduce(
           (s, i) => s + i.calculation.waxTreesRequired,
           0,

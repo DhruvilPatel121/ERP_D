@@ -25,6 +25,9 @@ import {
   Share2,
   Scale,
   Hash,
+  FileText,
+  ChevronDown,
+  Gem,
 } from "lucide-react";
 import {
   getOrders,
@@ -46,11 +49,20 @@ import {
 import { calculateGramOrder, calculatePieceOrder } from "@/lib/calculations";
 import { formatDate, nanoid } from "@/lib/utils";
 import { ORDER_STATUS_LABELS } from "@/lib/orderStatus";
+import { generateOrderPdf, generateOrdersPdf } from "@/lib/orderPdf";
 import { PageToolbar } from "@/components/layouts/AppLayout";
 import { SearchInput } from "@/components/common/SearchInput";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Combobox, type ComboboxOption } from "@/components/common/Combobox";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -70,7 +82,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { KarigarSplitEditor } from "@/components/common/KarigarSplitEditor";
+import { type SplitTarget } from "@/lib/karigarSplit";
 import type {
+  KarigarAssignment,
   Order,
   OrderItem,
   OrderStatus,
@@ -102,9 +117,6 @@ const orderSchema = z.object({
   notes: z.string().default(""),
   touch: z.string().default(""),
   items: z.array(orderItemSchema).min(1, "Add at least one pattern item"),
-  // Karigar assignment during order creation
-  waxKarigarId: z.string().optional(),
-  stoneKarigarId: z.string().optional(),
 });
 type OrderFormValues = z.infer<typeof orderSchema>;
 
@@ -592,11 +604,15 @@ function OrderItemRow({
 }) {
   const { control, setValue, getValues } = form;
 
-  const patternOptions: ComboboxOption[] = useMemo(() => 
-    patterns
-      .filter((p) => p.isActive)
-      .map((p) => ({ value: p.id, label: `${p.patternNumber} — ${p.patternName}` })),
-    [patterns]
+  const patternOptions: ComboboxOption[] = useMemo(
+    () =>
+      patterns
+        .filter((p) => p.isActive)
+        .map((p) => ({
+          value: p.id,
+          label: `${p.patternNumber} — ${p.patternName}`,
+        })),
+    [patterns],
   );
 
   // Watch the three reactive fields for this row
@@ -805,17 +821,18 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
   const patterns = useMemo(() => getPatterns(), []);
   const appSettings = useMemo(() => getAppSettings(), []);
   const karigars = useMemo(() => getKarigars().filter((k) => k.isActive), []);
-  const waxKarigars = useMemo(() => karigars.filter((k) => k.type === "wax"), [karigars]);
-  const stoneKarigars = useMemo(() => karigars.filter((k) => k.type === "stone"), [karigars]);
-
-  const customerOptions: ComboboxOption[] = useMemo(() => 
-    customers.map((c) => ({ value: c.id, label: c.partyName })),
-    [customers]
+  const waxKarigars = useMemo(
+    () => karigars.filter((k) => k.type === "wax"),
+    [karigars],
+  );
+  const stoneKarigars = useMemo(
+    () => karigars.filter((k) => k.type === "stone"),
+    [karigars],
   );
 
-  const stoneKarigarOptions: ComboboxOption[] = useMemo(() => 
-    stoneKarigars.map((k) => ({ value: k.id, label: k.name })),
-    [stoneKarigars]
+  const customerOptions: ComboboxOption[] = useMemo(
+    () => customers.map((c) => ({ value: c.id, label: c.partyName })),
+    [customers],
   );
 
   const form = useForm<OrderFormValues>({
@@ -827,8 +844,6 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
       notes: "",
       touch: "",
       items: [],
-      waxKarigarId: "",
-      stoneKarigarId: "",
     },
   });
 
@@ -837,48 +852,56 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
     name: "items",
   });
 
+  // One order can be handed to several karigars, each with its own quantity
+  const [waxAssignments, setWaxAssignments] = useState<KarigarAssignment[]>([]);
+  const [stoneAssignments, setStoneAssignments] = useState<KarigarAssignment[]>(
+    [],
+  );
+
   // Filter karigars based on selected patterns using dice ranges
-  const selectedPatternIds = useWatch({ control: form.control, name: "items" }) as any[];
-  const waxKarigarId = useWatch({ control: form.control, name: "waxKarigarId" });
-  
-  const filteredWaxKarigars = useMemo(() => {
-    if (!selectedPatternIds || selectedPatternIds.length === 0) return waxKarigars;
-    
-    // Get pattern numbers from selected patterns
-    const patternNumbers = selectedPatternIds
-      .filter((item) => item.patternId)
-      .map((item) => {
+  const selectedPatternIds = useWatch({
+    control: form.control,
+    name: "items",
+  }) as any[];
+
+  /** Order items shaped for the distribution editor (live, straight from the form) */
+  const splitTargets: SplitTarget[] = useMemo(() => {
+    return (selectedPatternIds ?? [])
+      .filter((item) => item && item.patternId)
+      .map((item, index) => {
         const pattern = patterns.find((p) => p.id === item.patternId);
-        return pattern?.patternNumber || "";
+        const snapshot = item.snapshot ?? pattern;
+        const calculation = item.calculationCache;
+        const patternNumber =
+          snapshot?.patternNumber ||
+          pattern?.patternNumber ||
+          `Item ${index + 1}`;
+        const patternName = snapshot?.patternName || pattern?.patternName || "";
+        return {
+          id: item.id as string,
+          label: patternName
+            ? `${patternNumber} — ${patternName}`
+            : patternNumber,
+          pieces: calculation?.finishedPieces ?? 0,
+          weightPerPiece:
+            snapshot?.weightPerPiece ?? pattern?.weightPerPiece ?? 0,
+          treeSize: snapshot?.treeSize ?? pattern?.treeSize ?? 0,
+        };
       });
+  }, [selectedPatternIds, patterns]);
 
-    if (patternNumbers.length === 0) return waxKarigars;
-
-    // Find karigars assigned to these pattern numbers via dice ranges
-    const assignedKarigarIds = new Set<string>();
-    patternNumbers.forEach((patternNumber) => {
-      const range = findKarigarForPattern(patternNumber);
-      if (range) {
-        assignedKarigarIds.add(range.karigarId);
-      }
-    });
-
-    // If no dice ranges match, show all karigars
-    if (assignedKarigarIds.size === 0) return waxKarigars;
-
-    // Filter to only show assigned karigars
-    return waxKarigars.filter((k) => assignedKarigarIds.has(k.id));
-  }, [selectedPatternIds, waxKarigars, patterns]);
-
-  const waxKarigarOptions: ComboboxOption[] = useMemo(() => 
-    filteredWaxKarigars.map((k) => ({ value: k.id, label: k.name })),
-    [filteredWaxKarigars]
+  /** Pattern dice range suggestion used when a karigar row is added */
+  const suggestWaxKarigarForItem = useCallback(
+    (itemId: string) => {
+      const target = splitTargets.find((t) => t.id === itemId);
+      const patternNumber = target?.label.split(" — ")[0] ?? "";
+      return findKarigarForPattern(patternNumber)?.karigarId ?? "";
+    },
+    [splitTargets],
   );
 
   // Stone karigar should only be selectable if wax karigar is assigned (sequential workflow)
-  const canSelectStoneKarigar = useMemo(() => {
-    return !!waxKarigarId;
-  }, [waxKarigarId]);
+  const canSelectStoneKarigar = waxAssignments.length > 0;
 
   const onSubmit: SubmitHandler<OrderFormValues> = (values) => {
     try {
@@ -886,25 +909,26 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
 
       // Helper function to normalize size strings for comparison
       const normalizeSize = (size: string) => {
-        if (!size) return '';
-        return size.toLowerCase()
-          .replace(/×/g, 'x')
-          .replace(/\*/g, 'x')
-          .replace(/\s*x\s*/g, 'x')
-          .replace(/\s+/g, '')
+        if (!size) return "";
+        return size
+          .toLowerCase()
+          .replace(/×/g, "x")
+          .replace(/\*/g, "x")
+          .replace(/\s*x\s*/g, "x")
+          .replace(/\s+/g, "")
           .trim();
       };
-      
+
       // Helper function to normalize shape strings for comparison
       const normalizeShape = (shape: string) => {
-        if (!shape) return '';
+        if (!shape) return "";
         return shape.toLowerCase().trim();
       };
 
       // Validate stone inventory before creating order
       const microDiamonds = getMicroDiamonds();
       const adDiamonds = getADDiamonds();
-      
+
       for (const item of values.items) {
         const pattern = patterns.find((p) => p.id === item.patternId);
         if (!pattern) continue;
@@ -934,45 +958,48 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
 
             if (stoneReq.stoneType === "micro") {
               const normalizedReqSize = normalizeSize(stoneReq.stoneSize);
-              const micro = microDiamonds.find((m) => 
-                normalizeSize(m.size) === normalizedReqSize &&
-                m.isActive !== false
+              const micro = microDiamonds.find(
+                (m) =>
+                  normalizeSize(m.size) === normalizedReqSize &&
+                  m.isActive !== false,
               );
               if (!micro || (micro.quantity || 0) < totalRequired) {
                 const available = micro?.quantity || 0;
                 toast.error(
-                  `Insufficient ${stoneReq.stoneSize}mm micro diamonds. Required: ${totalRequired}, Available: ${available}`
+                  `Insufficient ${stoneReq.stoneSize}mm micro diamonds. Required: ${totalRequired}, Available: ${available}`,
                 );
                 return;
               }
             } else if (stoneReq.stoneType === "ad") {
               const normalizedReqSize = normalizeSize(stoneReq.stoneSize);
               const normalizedReqShape = normalizeShape(stoneReq.shape);
-              
+
               // Try multiple matching strategies for validation
               let foundAd = null;
-              
+
               // Strategy 1: Exact match on size and shape
-              foundAd = adDiamonds.find((a) => 
-                normalizeSize(a.size) === normalizedReqSize &&
-                normalizeShape(a.shape) === normalizedReqShape &&
-                a.isActive !== false &&
-                (a.quantity || 0) > 0
+              foundAd = adDiamonds.find(
+                (a) =>
+                  normalizeSize(a.size) === normalizedReqSize &&
+                  normalizeShape(a.shape) === normalizedReqShape &&
+                  a.isActive !== false &&
+                  (a.quantity || 0) > 0,
               );
-              
+
               // Strategy 2: Try matching by size only if exact match fails
               if (!foundAd) {
-                foundAd = adDiamonds.find((a) => 
-                  normalizeSize(a.size) === normalizedReqSize &&
-                  a.isActive !== false &&
-                  (a.quantity || 0) > 0
+                foundAd = adDiamonds.find(
+                  (a) =>
+                    normalizeSize(a.size) === normalizedReqSize &&
+                    a.isActive !== false &&
+                    (a.quantity || 0) > 0,
                 );
               }
-              
+
               if (!foundAd || (foundAd.quantity || 0) < totalRequired) {
                 const available = foundAd?.quantity || 0;
                 toast.error(
-                  `Insufficient ${stoneReq.shape} ${stoneReq.stoneSize} AD diamonds. Required: ${totalRequired}, Available: ${available}`
+                  `Insufficient ${stoneReq.shape} ${stoneReq.stoneSize} AD diamonds. Required: ${totalRequired}, Available: ${available}`,
                 );
                 return;
               }
@@ -980,6 +1007,10 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
           }
         }
       }
+
+      // Map each form item id to the id the stored order item will get, so the
+      // karigar allotments keep pointing at the right pattern.
+      const itemIdMap = new Map<string, string>();
 
       const items: OrderItem[] = values.items.map((item) => {
         const pattern = patterns.find((p) => p.id === item.patternId)!;
@@ -1013,8 +1044,11 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
           totalStonesPerPiece: pattern.totalStonesPerPiece,
         };
 
+        const storedId = nanoid();
+        itemIdMap.set(item.id, storedId);
+
         return {
-          id: nanoid(),
+          id: storedId,
           patternId: item.patternId,
           snapshot,
           quantityType: item.quantityType,
@@ -1028,37 +1062,44 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
       const allGrams = items.every((i) => i.quantityType === "grams");
       const allPieces = items.every((i) => i.quantityType === "pieces");
 
-      // Build karigar assignments from form values
-      const karigarAssignments: Order["karigarAssignments"] = [];
-      let initialStatus: OrderStatus = "pending";
+      // ── Karigar distribution ────────────────────────────────────────────────
+      const sumPieces = (list: KarigarAssignment[]) =>
+        list.reduce((sum, a) => sum + (Number(a.allottedPieces) || 0), 0);
+      const totalPieces = items.reduce(
+        (sum, i) => sum + (i.calculation?.finishedPieces ?? 0),
+        0,
+      );
 
-      if (values.waxKarigarId) {
-        const waxKarigar = karigars.find((k) => k.id === values.waxKarigarId);
-        if (waxKarigar) {
-          karigarAssignments.push({
-            type: "wax",
-            karigarId: waxKarigar.id,
-            karigarName: waxKarigar.name,
-            assignedAt: new Date().toISOString(),
-            notes: "Assigned during order creation",
-          });
-          initialStatus = "assigned";
+      for (const [label, list] of [
+        ["Wax", waxAssignments],
+        ["Stone", stoneAssignments],
+      ] as const) {
+        if (sumPieces([...list]) > totalPieces) {
+          toast.error(
+            `${label} karigar distribution exceeds the order quantity. Reduce the allotted pieces.`,
+          );
+          return;
+        }
+        if (list.some((a) => !a.karigarId)) {
+          toast.error(
+            `Select a karigar for every ${label.toLowerCase()} allotment.`,
+          );
+          return;
         }
       }
 
-      if (values.stoneKarigarId) {
-        const stoneKarigar = karigars.find((k) => k.id === values.stoneKarigarId);
-        if (stoneKarigar) {
-          karigarAssignments.push({
-            type: "stone",
-            karigarId: stoneKarigar.id,
-            karigarName: stoneKarigar.name,
-            assignedAt: new Date().toISOString(),
-            notes: "Assigned during order creation",
-          });
-          initialStatus = karigarAssignments.length > 0 ? "assigned" : "pending";
-        }
-      }
+      const karigarAssignments: Order["karigarAssignments"] = [
+        ...waxAssignments,
+        ...stoneAssignments,
+      ].map((a) => ({
+        ...a,
+        id: nanoid(),
+        itemId: a.itemId ? (itemIdMap.get(a.itemId) ?? "") : "",
+        assignedAt: new Date().toISOString(),
+      }));
+
+      const initialStatus: OrderStatus =
+        karigarAssignments.length > 0 ? "assigned" : "pending";
 
       // Track stone usage for this order
       const stoneUsage: any[] = [];
@@ -1068,78 +1109,92 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
         if (item.calculation && item.calculation.stoneRequirements) {
           for (const stoneReq of item.calculation.stoneRequirements) {
             if (stoneReq.stoneType === "micro") {
-              const micro = microDiamonds.find((m) => 
-                normalizeSize(m.size) === normalizeSize(stoneReq.stoneSize) &&
-                m.isActive !== false
+              const micro = microDiamonds.find(
+                (m) =>
+                  normalizeSize(m.size) === normalizeSize(stoneReq.stoneSize) &&
+                  m.isActive !== false,
               );
               if (micro && (micro.quantity || 0) >= stoneReq.requiredQty) {
                 // Direct update to avoid triggering totalQuantity increase logic
                 const stones = getMicroDiamonds();
                 const idx = stones.findIndex((s) => s.id === micro.id);
                 if (idx >= 0) {
-                  stones[idx] = { 
-                    ...stones[idx], 
+                  stones[idx] = {
+                    ...stones[idx],
                     quantity: (micro.quantity || 0) - stoneReq.requiredQty,
-                    updatedAt: new Date().toISOString()
+                    updatedAt: new Date().toISOString(),
                   };
                   saveMicroDiamonds(stones);
                 }
-                
+
                 stoneUsage.push({
-                  stoneType: 'micro',
+                  stoneType: "micro",
                   stoneId: micro.id,
                   stoneName: `${micro.size}mm`,
+                  stoneSize: micro.size,
                   quantityUsed: stoneReq.requiredQty,
                   itemId: item.id,
                 });
-                console.log(`Deducted ${stoneReq.requiredQty} ${micro.size}mm micro diamonds from inventory (remaining: ${(micro.quantity || 0) - stoneReq.requiredQty})`);
+                console.log(
+                  `Deducted ${stoneReq.requiredQty} ${micro.size}mm micro diamonds from inventory (remaining: ${(micro.quantity || 0) - stoneReq.requiredQty})`,
+                );
               } else {
-                console.warn(`Insufficient ${stoneReq.stoneSize}mm micro diamonds. Required: ${stoneReq.requiredQty}, Available: ${micro?.quantity || 0}`);
+                console.warn(
+                  `Insufficient ${stoneReq.stoneSize}mm micro diamonds. Required: ${stoneReq.requiredQty}, Available: ${micro?.quantity || 0}`,
+                );
               }
             } else if (stoneReq.stoneType === "ad") {
               // Try multiple matching strategies for AD diamonds
               let foundAd = null;
-              
+
               // Strategy 1: Exact match on size and shape
-              foundAd = adDiamonds.find((a) => 
-                normalizeSize(a.size) === normalizeSize(stoneReq.stoneSize) &&
-                normalizeShape(a.shape) === normalizeShape(stoneReq.shape) &&
-                a.isActive !== false &&
-                (a.quantity || 0) > 0
+              foundAd = adDiamonds.find(
+                (a) =>
+                  normalizeSize(a.size) === normalizeSize(stoneReq.stoneSize) &&
+                  normalizeShape(a.shape) === normalizeShape(stoneReq.shape) &&
+                  a.isActive !== false &&
+                  (a.quantity || 0) > 0,
               );
-              
+
               // Strategy 2: Try matching by size only if exact match fails
               if (!foundAd) {
-                foundAd = adDiamonds.find((a) => 
-                  normalizeSize(a.size) === normalizeSize(stoneReq.stoneSize) &&
-                  a.isActive !== false &&
-                  (a.quantity || 0) > 0
+                foundAd = adDiamonds.find(
+                  (a) =>
+                    normalizeSize(a.size) ===
+                      normalizeSize(stoneReq.stoneSize) &&
+                    a.isActive !== false &&
+                    (a.quantity || 0) > 0,
                 );
               }
-              
+
               if (foundAd && (foundAd.quantity || 0) >= stoneReq.requiredQty) {
                 // Direct update to avoid triggering totalQuantity increase logic
                 const stones = getADDiamonds();
                 const idx = stones.findIndex((s) => s.id === foundAd.id);
                 if (idx >= 0) {
-                  stones[idx] = { 
-                    ...stones[idx], 
+                  stones[idx] = {
+                    ...stones[idx],
                     quantity: (foundAd.quantity || 0) - stoneReq.requiredQty,
-                    updatedAt: new Date().toISOString()
+                    updatedAt: new Date().toISOString(),
                   };
                   saveADDiamonds(stones);
                 }
-                
+
                 stoneUsage.push({
-                  stoneType: 'ad',
+                  stoneType: "ad",
                   stoneId: foundAd.id,
                   stoneName: `${foundAd.shape} ${foundAd.size}`,
+                  stoneSize: foundAd.size,
                   quantityUsed: stoneReq.requiredQty,
                   itemId: item.id,
                 });
-                console.log(`Deducted ${stoneReq.requiredQty} ${foundAd.shape} ${foundAd.size} AD diamonds from inventory (remaining: ${(foundAd.quantity || 0) - stoneReq.requiredQty})`);
+                console.log(
+                  `Deducted ${stoneReq.requiredQty} ${foundAd.shape} ${foundAd.size} AD diamonds from inventory (remaining: ${(foundAd.quantity || 0) - stoneReq.requiredQty})`,
+                );
               } else {
-                console.warn(`Insufficient ${stoneReq.shape} ${stoneReq.stoneSize} AD diamonds. Required: ${stoneReq.requiredQty}, Available: ${foundAd?.quantity || 0}`);
+                console.warn(
+                  `Insufficient ${stoneReq.shape} ${stoneReq.stoneSize} AD diamonds. Required: ${stoneReq.requiredQty}, Available: ${foundAd?.quantity || 0}`,
+                );
               }
             }
           }
@@ -1162,9 +1217,10 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
             status: initialStatus,
             changedAt: new Date().toISOString(),
             changedBy: "admin",
-            notes: karigarAssignments.length > 0
-              ? `Order created with ${karigarAssignments.length} karigar assignment(s)`
-              : "Order created",
+            notes:
+              karigarAssignments.length > 0
+                ? `Order created with ${karigarAssignments.length} karigar assignment(s)`
+                : "Order created",
           },
         ],
         karigarAssignments,
@@ -1227,7 +1283,9 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
             {/* Order Details Section */}
             <div className="border border-border rounded-lg bg-card">
               <div className="px-4 py-3 border-b border-border bg-muted/50">
-                <h3 className="text-sm font-semibold text-foreground">Order Details</h3>
+                <h3 className="text-sm font-semibold text-foreground">
+                  Order Details
+                </h3>
               </div>
               <div className="p-4 grid grid-cols-3 gap-4">
                 <FormField
@@ -1235,7 +1293,9 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
                   name="customerId"
                   render={({ field }) => (
                     <FormItem className="col-span-1">
-                      <FormLabel className="text-xs font-medium">Customer *</FormLabel>
+                      <FormLabel className="text-xs font-medium">
+                        Customer *
+                      </FormLabel>
                       <Combobox
                         options={customerOptions}
                         value={field.value}
@@ -1252,7 +1312,9 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
                   name="orderDate"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs font-medium">Order Date *</FormLabel>
+                      <FormLabel className="text-xs font-medium">
+                        Order Date *
+                      </FormLabel>
                       <FormControl>
                         <Input {...field} type="date" className="h-9 text-sm" />
                       </FormControl>
@@ -1265,7 +1327,9 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
                   name="orderQuantityType"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs font-medium">Order Quantity Type *</FormLabel>
+                      <FormLabel className="text-xs font-medium">
+                        Order Quantity Type *
+                      </FormLabel>
                       <div className="mt-1">
                         <OrderQtyTypeRadio
                           value={field.value as "grams" | "pieces" | "mixed"}
@@ -1283,7 +1347,9 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
                   name="touch"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs font-medium">Touch</FormLabel>
+                      <FormLabel className="text-xs font-medium">
+                        Touch
+                      </FormLabel>
                       <FormControl>
                         <Input
                           {...field}
@@ -1300,7 +1366,9 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
                   name="notes"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs font-medium">Order Notes</FormLabel>
+                      <FormLabel className="text-xs font-medium">
+                        Order Notes
+                      </FormLabel>
                       <FormControl>
                         <Textarea
                           {...field}
@@ -1318,7 +1386,9 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
             {/* Order Items Section - Excel-like Design */}
             <div className="border border-border rounded-lg bg-card">
               <div className="px-4 py-3 border-b border-border bg-muted/50 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-foreground">Order Items</h3>
+                <h3 className="text-sm font-semibold text-foreground">
+                  Order Items
+                </h3>
                 <div className="flex items-center gap-3">
                   <span className="text-xs text-muted-foreground">
                     {fields.length} item{fields.length !== 1 ? "s" : ""}
@@ -1378,13 +1448,27 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
                   <table className="w-full border-collapse">
                     <thead>
                       <tr className="bg-muted/50 border-b border-border">
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border">Pattern</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-32">Type</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-28">Quantity</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-28">Fin. Pcs / Wt</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-20">Trees</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-28">Stones</th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-32">Notes</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border">
+                          Pattern
+                        </th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-32">
+                          Type
+                        </th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-28">
+                          Quantity
+                        </th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-28">
+                          Fin. Pcs / Wt
+                        </th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-20">
+                          Trees
+                        </th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-28">
+                          Stones
+                        </th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-foreground border-r border-border w-32">
+                          Notes
+                        </th>
                         <th className="px-3 py-2 text-center text-xs font-semibold text-foreground w-10"></th>
                       </tr>
                     </thead>
@@ -1405,54 +1489,35 @@ function NewOrderPage({ onClose }: { onClose: () => void }) {
               )}
             </div>
 
-            {/* Karigar Assignment Section */}
+            {/* Karigar Distribution Section */}
             <div className="border border-border rounded-lg bg-card">
               <div className="px-4 py-3 border-b border-border bg-muted/50">
-                <h3 className="text-sm font-semibold text-foreground">Karigar Assignment (Optional)</h3>
+                <h3 className="text-sm font-semibold text-foreground">
+                  Karigar Distribution (Optional)
+                </h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Split the same order across several karigars. Any quantity per
+                  karigar is allowed - each order can be distributed
+                  differently.
+                </p>
               </div>
-              <div className="p-4 grid grid-cols-2 gap-6">
-                <FormField
-                  control={form.control}
-                  name="waxKarigarId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-xs font-medium">Wax Karigar</FormLabel>
-                      <Combobox
-                        options={waxKarigarOptions}
-                        value={field.value}
-                        onChange={field.onChange}
-                        placeholder="Select wax karigar..."
-                        emptyMessage="No wax karigars available"
-                        className="h-9"
-                      />
-                      <p className="text-[11px] text-muted-foreground mt-1">
-                        Assign wax karigar now to skip manual assignment
-                      </p>
-                    </FormItem>
-                  )}
+              <div className="p-4 space-y-5">
+                <KarigarSplitEditor
+                  type="wax"
+                  targets={splitTargets}
+                  karigars={waxKarigars}
+                  value={waxAssignments}
+                  onChange={setWaxAssignments}
+                  suggestedKarigarId={suggestWaxKarigarForItem}
                 />
-                <FormField
-                  control={form.control}
-                  name="stoneKarigarId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-xs font-medium">Stone Karigar</FormLabel>
-                      <Combobox
-                        options={stoneKarigarOptions}
-                        value={field.value}
-                        onChange={field.onChange}
-                        placeholder={canSelectStoneKarigar ? "Select stone karigar..." : "Assign wax karigar first"}
-                        emptyMessage="No stone karigars available"
-                        className="h-9"
-                        disabled={!canSelectStoneKarigar}
-                      />
-                      <p className="text-[11px] text-muted-foreground mt-1">
-                        {!canSelectStoneKarigar 
-                          ? "Assign wax karigar first to enable stone assignment" 
-                          : "Assign stone karigar now to skip manual assignment"}
-                      </p>
-                    </FormItem>
-                  )}
+                <KarigarSplitEditor
+                  type="stone"
+                  targets={splitTargets}
+                  karigars={stoneKarigars}
+                  value={stoneAssignments}
+                  onChange={setStoneAssignments}
+                  disabled={!canSelectStoneKarigar}
+                  disabledHint="Assign a wax karigar first to enable stone distribution."
                 />
               </div>
             </div>
@@ -1516,7 +1581,12 @@ export default function OrdersPage() {
 
   const handleDelete = () => {
     if (!deleteTarget) return;
-    if (!confirm(`Are you sure you want to delete order ${deleteTarget.orderNumber}? This cannot be undone.\n\nStones used in this order will be restored to inventory.`)) return;
+    if (
+      !confirm(
+        `Are you sure you want to delete order ${deleteTarget.orderNumber}? This cannot be undone.\n\nStones used in this order will be restored to inventory.`,
+      )
+    )
+      return;
     try {
       deleteOrder(deleteTarget.id);
       toast.success("Order deleted and stones restored to inventory");
@@ -1552,7 +1622,7 @@ export default function OrdersPage() {
   if (view === "party")
     return (
       <PartyOrdersPage
-        partyName={selectedParty}
+        partyName={selectedParty ?? ""}
         orders={partyOrders}
         onBack={() => setView("list")}
         onStatusChange={handleStatusChange}
@@ -1566,14 +1636,75 @@ export default function OrdersPage() {
         title="Orders"
         subtitle={`${orders.length} total · ${grouped.length} part${grouped.length !== 1 ? "ies" : "y"}`}
         actions={
-          <Button
-            size="sm"
-            className="h-7 text-xs"
-            onClick={() => setView("new")}
-          >
-            <Plus size={12} className="mr-1" />
-            New Order
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  disabled={filtered.length === 0}
+                >
+                  <FileText size={12} className="mr-1 text-red-500" />
+                  All Orders PDF ({filtered.length})
+                  <ChevronDown size={12} className="ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel className="text-[11px] text-muted-foreground">
+                  Batch download ({filtered.length} orders)
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() =>
+                    generateOrdersPdf(filtered, {
+                      workType: "both",
+                      title: "Order Details",
+                      indexTitle: "All Orders Summary",
+                      fileName: `all-orders-${new Date().toISOString().slice(0, 10)}`,
+                    })
+                  }
+                >
+                  <Package size={13} className="mr-2 text-primary" />
+                  Full Orders PDF (Wax + Stone)
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    generateOrdersPdf(filtered, {
+                      workType: "wax",
+                      title: "Wax Work Order",
+                      indexTitle: "Wax Orders Summary",
+                      fileName: `all-wax-orders-${new Date().toISOString().slice(0, 10)}`,
+                    })
+                  }
+                >
+                  <FileText size={13} className="mr-2 text-amber-600" />
+                  Wax Only PDF
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    generateOrdersPdf(filtered, {
+                      workType: "stone",
+                      title: "Stone Work Order",
+                      indexTitle: "Stone Orders Summary",
+                      fileName: `all-stone-orders-${new Date().toISOString().slice(0, 10)}`,
+                    })
+                  }
+                >
+                  <Gem size={13} className="mr-2 text-teal-600" />
+                  Stone Only PDF
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => setView("new")}
+            >
+              <Plus size={12} className="mr-1" />
+              New Order
+            </Button>
+          </div>
         }
       />
 

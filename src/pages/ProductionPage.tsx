@@ -1,25 +1,24 @@
 import { useState, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ChevronRight, Hammer, Gem, Eye, Trash2, MessageCircle, Download } from "lucide-react";
+import { ChevronRight, Hammer, Gem, Eye, Trash2, MessageCircle, Pencil } from "lucide-react";
 import html2canvas from "html2canvas";
 import { getOrders, updateOrder, deleteOrder, getKarigars } from "@/lib/db";
-import { formatDate } from "@/lib/utils";
+import { formatDate, nanoid } from "@/lib/utils";
 import { ORDER_STATUS_LABELS, getNextStatuses } from "@/lib/orderStatus";
 import { PageToolbar } from "@/components/layouts/AppLayout";
 import { StatusBadge } from "@/components/common/StatusBadge";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { KarigarSplitEditor } from "@/components/common/KarigarSplitEditor";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import type { Order, OrderStatus } from "@/types/erp";
+  assignmentsOfType,
+  buildSplitTargets,
+  describeAllotment,
+  splitBalance,
+  type SplitTarget,
+} from "@/lib/karigarSplit";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { KarigarAssignment, Order, OrderStatus } from "@/types/erp";
 
 const WAX_STAGES: OrderStatus[] = [
   "assigned",
@@ -37,8 +36,68 @@ const ALL_PRODUCTION_STAGES: OrderStatus[] = [
   "production_completed",
 ];
 
-// Generate WhatsApp JPG for wax karigar
-function generateWaxKarigarJPG(order: Order, karigar: any): string {
+/** One table row per karigar allotment, used inside the WhatsApp work-order images */
+function distributionRowsHTML(
+  assignments: KarigarAssignment[],
+  targets: SplitTarget[],
+): string {
+  return assignments
+    .map((a) => {
+      const target = targets.find((t) => t.id === a.itemId);
+      const pieces = Number(a.allottedPieces) || 0;
+      const grams = target
+        ? pieces * (target.weightPerPiece || 0)
+        : Number(a.allottedGrams) || 0;
+      const label = target ? target.label : "Whole order";
+      const gramsText = grams > 0 ? ` · ${grams.toFixed(3)} g` : "";
+      return `<tr>
+        <td style="padding: 4px 6px; border-bottom: 1px solid #eee;">${a.karigarName}</td>
+        <td style="padding: 4px 6px; border-bottom: 1px solid #eee;">${label}</td>
+        <td style="padding: 4px 6px; border-bottom: 1px solid #eee; text-align: right; white-space: nowrap;">${pieces} pcs${gramsText}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
+/** Distribution block shared by the wax and stone work-order images */
+function distributionTableHTML(
+  assignments: KarigarAssignment[],
+  targets: SplitTarget[],
+): string {
+  if (assignments.length === 0) return "";
+
+  const allotted = assignments.reduce(
+    (sum, a) => sum + (Number(a.allottedPieces) || 0),
+    0,
+  );
+  const required = targets.reduce((sum, t) => sum + t.pieces, 0);
+
+  return `
+    <div style="margin-top: 15px; margin-bottom: 5px;">
+      <strong>${assignments.length > 1 ? "Karigar Distribution:" : "Karigar:"}</strong>
+    </div>
+    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+      <thead>
+        <tr>
+          <th style="text-align: left; padding: 4px 6px; border-bottom: 1px solid #ddd;">Karigar</th>
+          <th style="text-align: left; padding: 4px 6px; border-bottom: 1px solid #ddd;">Pattern</th>
+          <th style="text-align: right; padding: 4px 6px; border-bottom: 1px solid #ddd;">Qty</th>
+        </tr>
+      </thead>
+      <tbody>${distributionRowsHTML(assignments, targets)}</tbody>
+    </table>
+    <div style="margin-top: 6px; font-size: 12px; color: #444;">
+      Distributed: <strong>${allotted}</strong> / ${required} pcs
+    </div>
+    `;
+}
+
+// Generate WhatsApp JPG for the wax karigar(s)
+function generateWaxKarigarJPG(
+  order: Order,
+  assignments: KarigarAssignment[],
+  targets: SplitTarget[],
+): string {
   const totalWaxTrees = order.items.reduce((sum, item) => {
     const calc = item.calculation;
     return sum + (calc?.waxTreesRequired || 0);
@@ -47,7 +106,7 @@ function generateWaxKarigarJPG(order: Order, karigar: any): string {
   return `
     <div style="padding: 20px; font-family: Arial, sans-serif; max-width: 400px; background: white;">
       <div style="border: 2px solid #d4af37; border-radius: 10px; padding: 15px;">
-        <h2 style="color: #d4af37; margin: 0 0 15px 0; text-align: center; font-size: 18px;">Wax Work Assignment</h2>
+        <h2 style="color: #d4af37; margin: 0 0 15px 0; text-align: center; font-size: 18px;">${assignments.length > 1 ? "Wax Work Distribution" : "Wax Work Assignment"}</h2>
         <div style="margin-bottom: 10px;">
           <strong>Party/Customer:</strong> ${order.customerName}
         </div>
@@ -62,6 +121,7 @@ function generateWaxKarigarJPG(order: Order, karigar: any): string {
             • ${item.snapshot?.patternNumber || 'N/A'} - ${item.snapshot?.patternName || 'N/A'}
           </div>
         `).join('')}
+        ${distributionTableHTML(assignments, targets)}
         <div style="margin-top: 15px; margin-bottom: 10px;">
           <strong>Total Wax Trees Required:</strong> ${totalWaxTrees}
         </div>
@@ -73,8 +133,12 @@ function generateWaxKarigarJPG(order: Order, karigar: any): string {
   `;
 }
 
-// Generate WhatsApp JPG for stone karigar
-function generateStoneKarigarJPG(order: Order, karigar: any): string {
+// Generate WhatsApp JPG for the stone setting karigar(s)
+function generateStoneKarigarJPG(
+  order: Order,
+  assignments: KarigarAssignment[],
+  targets: SplitTarget[],
+): string {
   const stoneDetails = order.items.reduce((acc: any[], item) => {
     const config = item.snapshot?.stoneConfig || [];
     config.forEach((stone: any) => {
@@ -93,15 +157,15 @@ function generateStoneKarigarJPG(order: Order, karigar: any): string {
     return acc;
   }, []);
 
-  const totalWaxPieces = order.items.reduce((sum, item) => {
-    const calc = item.calculation;
-    return sum + (calc?.totalPieces || 0);
-  }, 0);
+  const totalWaxPieces = assignments.reduce(
+    (sum, a) => sum + (Number(a.allottedPieces) || 0),
+    0,
+  );
 
   return `
     <div style="padding: 20px; font-family: Arial, sans-serif; max-width: 400px; background: white;">
       <div style="border: 2px solid #d4af37; border-radius: 10px; padding: 15px;">
-        <h2 style="color: #d4af37; margin: 0 0 15px 0; text-align: center; font-size: 18px;">Stone Setting Assignment</h2>
+        <h2 style="color: #d4af37; margin: 0 0 15px 0; text-align: center; font-size: 18px;">${assignments.length > 1 ? "Stone Setting Distribution" : "Stone Setting Assignment"}</h2>
         <div style="margin-bottom: 10px;">
           <strong>Party/Customer:</strong> ${order.customerName}
         </div>
@@ -116,6 +180,7 @@ function generateStoneKarigarJPG(order: Order, karigar: any): string {
             • ${item.snapshot?.patternNumber || 'N/A'} - ${item.snapshot?.patternName || 'N/A'}
           </div>
         `).join('')}
+        ${distributionTableHTML(assignments, targets)}
         <div style="margin-top: 15px; margin-bottom: 10px;">
           <strong>Stone Requirements:</strong>
         </div>
@@ -125,7 +190,7 @@ function generateStoneKarigarJPG(order: Order, karigar: any): string {
           </div>
         `).join('')}
         <div style="margin-top: 15px; margin-bottom: 10px;">
-          <strong>Total Wax Pieces Given:</strong> ${totalWaxPieces}
+          <strong>Total Pieces Handed Over:</strong> ${totalWaxPieces}
         </div>
         <div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 12px; color: #666;">
           Generated on ${new Date().toLocaleDateString()}
@@ -160,6 +225,41 @@ async function shareToWhatsApp(imageDataUrl: string, phoneNumber?: string) {
   }
 }
 
+/**
+ * Render a work-order snippet off-screen, copy it to the clipboard and open
+ * WhatsApp. When the work is split between several karigars there is no single
+ * phone number, so the chat is left for the user to pick.
+ */
+async function renderAndShare(
+  htmlContent: string,
+  phoneNumber: string,
+  karigarCount: number,
+) {
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = htmlContent;
+  tempDiv.style.position = 'fixed';
+  tempDiv.style.left = '-9999px';
+  tempDiv.style.top = '0';
+  document.body.appendChild(tempDiv);
+
+  try {
+    const canvas = await html2canvas(tempDiv, {
+      backgroundColor: '#ffffff',
+      scale: 2,
+    });
+    const imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+    await shareToWhatsApp(imageDataUrl, phoneNumber);
+    if (karigarCount > 1) {
+      toast.info("Insert the image in the chat of the karigar you want to notify.");
+    }
+  } catch (error) {
+    console.error('Failed to generate image:', error);
+    toast.error("Failed to generate image");
+  } finally {
+    document.body.removeChild(tempDiv);
+  }
+}
+
 function InlineAssignPanel({
   order,
   type,
@@ -169,81 +269,103 @@ function InlineAssignPanel({
   type: "wax" | "stone";
   onDone: () => void;
 }) {
-  const karigars = useMemo(() => getKarigars().filter((k) => k.isActive), []);
-  const [karigarId, setKarigarId] = useState("");
-  const [notes, setNotes] = useState("");
+  const karigars = useMemo(
+    () => getKarigars().filter((k) => k.isActive && k.type === type),
+    [type],
+  );
+  const targets = useMemo(() => buildSplitTargets(order.items), [order.items]);
+  const [rows, setRows] = useState<KarigarAssignment[]>(() =>
+    assignmentsOfType(order.karigarAssignments ?? [], type).map((a) => ({ ...a })),
+  );
 
   const handle = () => {
-    if (!karigarId) {
-      toast.error("Select a karigar");
+    if (rows.some((row) => !row.karigarId)) {
+      toast.error("Every allotment needs a karigar");
       return;
     }
-    const k = karigars.find((x) => x.id === karigarId)!;
-    const newStatus: OrderStatus =
+    if (rows.some((row) => !row.allottedPieces)) {
+      toast.error("Enter the number of pieces for every karigar");
+      return;
+    }
+
+    const balance = splitBalance(targets, rows, type, "");
+    if (balance.overAllocated) {
+      toast.error(
+        `Distribution exceeds the order by ${balance.totalAllotted - balance.totalRequired} pcs. Please adjust the quantities.`,
+      );
+      return;
+    }
+
+    const saved: KarigarAssignment[] = rows.map((row) => ({
+      ...row,
+      id: row.id || nanoid(),
+      assignedAt: row.assignedAt || new Date().toISOString(),
+    }));
+
+    const advancesTo: OrderStatus =
       type === "wax" ? "wax_in_progress" : "stone_setting_in_progress";
+    const earlierStages: OrderStatus[] =
+      type === "wax"
+        ? ["pending", "assigned"]
+        : ["pending", "assigned", "wax_in_progress", "wax_completed", "stone_setting_pending"];
+    const shouldAdvance = saved.length > 0 && earlierStages.includes(order.status);
+
     updateOrder(order.id, {
       karigarAssignments: [
-        ...order.karigarAssignments,
-        {
-          type,
-          karigarId,
-          karigarName: k.name,
-          assignedAt: new Date().toISOString(),
-          notes,
-        },
+        ...(order.karigarAssignments ?? []).filter((a) => a.type !== type),
+        ...saved,
       ],
-      status: newStatus,
-      statusHistory: [
-        ...order.statusHistory,
-        {
-          status: newStatus,
-          changedAt: new Date().toISOString(),
-          changedBy: "admin",
-          notes: `${type} work assigned to ${k.name}`,
-        },
-      ],
+      ...(shouldAdvance
+        ? {
+            status: advancesTo,
+            statusHistory: [
+              ...order.statusHistory,
+              {
+                status: advancesTo,
+                changedAt: new Date().toISOString(),
+                changedBy: "admin",
+                notes: `${type === "wax" ? "Wax" : "Stone"} work distributed to ${saved.length} karigar${saved.length > 1 ? "s" : ""}`,
+              },
+            ],
+          }
+        : {}),
     });
-    toast.success(`${k.name} assigned for ${type} work`);
+
+    if (balance.unallocated > 0) {
+      toast.warning(
+        `${balance.unallocated} pcs are still without a karigar and can be distributed later.`,
+      );
+    }
+    toast.success(
+      `${type === "wax" ? "Wax" : "Stone"} work saved for ${saved.length} karigar${saved.length > 1 ? "s" : ""}`,
+    );
     onDone();
   };
 
   return (
     <tr>
-      <td colSpan={7} className="px-4 py-2 bg-muted/40 border-b border-border">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium whitespace-nowrap">
-            Assign {type === "wax" ? "Wax" : "Stone"} Karigar:
-          </span>
-          <Select value={karigarId} onValueChange={setKarigarId}>
-            <SelectTrigger className="h-7 w-52 text-xs">
-              <SelectValue placeholder="Select karigar" />
-            </SelectTrigger>
-            <SelectContent>
-              {karigars.map((k) => (
-                <SelectItem key={k.id} value={k.id}>
-                  {k.name} — {k.type}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Notes…"
-            rows={1}
-            className="h-7 text-xs py-1 w-40 resize-none"
+      <td colSpan={7} className="px-4 py-3 bg-muted/40 border-b border-border">
+        <div className="flex flex-col gap-2">
+          <KarigarSplitEditor
+            type={type}
+            targets={targets}
+            karigars={karigars}
+            value={rows}
+            onChange={setRows}
           />
-          <Button size="sm" className="h-7 text-xs" onClick={handle}>
-            Assign
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            onClick={onDone}
-          >
-            Cancel
-          </Button>
+          <div className="flex gap-2 justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={onDone}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" className="h-7 text-xs" onClick={handle}>
+              Save Distribution
+            </Button>
+          </div>
         </div>
       </td>
     </tr>
@@ -288,6 +410,69 @@ function AdvanceStatusButton({
   );
 }
 
+function KarigarAllotmentCell({
+  type,
+  assignments,
+  targets,
+  totalPieces,
+  allottedPieces,
+  onEdit,
+  onShare,
+}: {
+  type: "wax" | "stone";
+  assignments: KarigarAssignment[];
+  targets: SplitTarget[];
+  totalPieces: number;
+  allottedPieces: number;
+  onEdit: () => void;
+  onShare: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      {assignments.map((a) => (
+        <div
+          key={a.id || `${a.karigarId}-${a.itemId}`}
+          className="flex items-center gap-1"
+        >
+          {type === "wax" ? (
+            <Hammer size={10} className="text-orange-500 shrink-0" />
+          ) : (
+            <Gem size={10} className="text-pink-500 shrink-0" />
+          )}
+          <span className="font-medium">{a.karigarName}</span>
+          <span className="text-muted-foreground">
+            {describeAllotment(a, targets)}
+          </span>
+        </div>
+      ))}
+      <div className="flex items-center gap-1 mt-0.5">
+        <span className="text-[10px] text-muted-foreground">
+          {allottedPieces}/{totalPieces} pcs · {assignments.length} karigar
+          {assignments.length > 1 ? "s" : ""}
+        </span>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
+          onClick={onEdit}
+          title="Edit distribution"
+        >
+          <Pencil size={10} />
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-5 w-5 p-0 text-green-600 hover:text-green-700"
+          onClick={onShare}
+          title="Share via WhatsApp"
+        >
+          <MessageCircle size={10} />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function ProductionOrderRow({
   order,
   onRefresh,
@@ -297,12 +482,24 @@ function ProductionOrderRow({
 }) {
   const navigate = useNavigate();
   const [assignType, setAssignType] = useState<"wax" | "stone" | null>(null);
-  const waxAssign = order.karigarAssignments
-    .filter((a) => a.type === "wax")
-    .slice(-1)[0];
-  const stoneAssign = order.karigarAssignments
-    .filter((a) => a.type === "stone")
-    .slice(-1)[0];
+  const targets = useMemo(() => buildSplitTargets(order.items), [order.items]);
+  const waxAssignments = assignmentsOfType(
+    order.karigarAssignments ?? [],
+    "wax",
+  );
+  const stoneAssignments = assignmentsOfType(
+    order.karigarAssignments ?? [],
+    "stone",
+  );
+  const waxAllottedPieces = waxAssignments.reduce(
+    (sum, a) => sum + (Number(a.allottedPieces) || 0),
+    0,
+  );
+  const stoneAllottedPieces = stoneAssignments.reduce(
+    (sum, a) => sum + (Number(a.allottedPieces) || 0),
+    0,
+  );
+  const totalPieces = targets.reduce((sum, t) => sum + t.pieces, 0);
 
   const isWaxStage = WAX_STAGES.includes(order.status);
   const isStoneStage = STONE_STAGES.includes(order.status);
@@ -320,69 +517,31 @@ function ProductionOrderRow({
   };
 
   const handleShareWax = async () => {
-    if (!waxAssign) return;
-    const htmlContent = generateWaxKarigarJPG(order, waxAssign);
-    
-    // Create a temporary div to render the HTML
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = htmlContent;
-    tempDiv.style.position = 'fixed';
-    tempDiv.style.left = '-9999px';
-    tempDiv.style.top = '0';
-    document.body.appendChild(tempDiv);
-
-    try {
-      const canvas = await html2canvas(tempDiv, {
-        backgroundColor: '#ffffff',
-        scale: 2,
-      });
-      const imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
-      
-      // Get karigar phone number if available
-      const karigars = getKarigars();
-      const karigar = karigars.find(k => k.id === waxAssign.karigarId);
-      const phoneNumber = karigar?.mobile || '';
-      
-      await shareToWhatsApp(imageDataUrl, phoneNumber);
-    } catch (error) {
-      console.error('Failed to generate image:', error);
-      toast.error("Failed to generate image");
-    } finally {
-      document.body.removeChild(tempDiv);
-    }
+    if (waxAssignments.length === 0) return;
+    const phone =
+      waxAssignments.length === 1
+        ? getKarigars().find((k) => k.id === waxAssignments[0].karigarId)
+            ?.mobile || ""
+        : "";
+    await renderAndShare(
+      generateWaxKarigarJPG(order, waxAssignments, targets),
+      phone,
+      waxAssignments.length,
+    );
   };
 
   const handleShareStone = async () => {
-    if (!stoneAssign) return;
-    const htmlContent = generateStoneKarigarJPG(order, stoneAssign);
-    
-    // Create a temporary div to render the HTML
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = htmlContent;
-    tempDiv.style.position = 'fixed';
-    tempDiv.style.left = '-9999px';
-    tempDiv.style.top = '0';
-    document.body.appendChild(tempDiv);
-
-    try {
-      const canvas = await html2canvas(tempDiv, {
-        backgroundColor: '#ffffff',
-        scale: 2,
-      });
-      const imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
-      
-      // Get karigar phone number if available
-      const karigars = getKarigars();
-      const karigar = karigars.find(k => k.id === stoneAssign.karigarId);
-      const phoneNumber = karigar?.mobile || '';
-      
-      await shareToWhatsApp(imageDataUrl, phoneNumber);
-    } catch (error) {
-      console.error('Failed to generate image:', error);
-      toast.error("Failed to generate image");
-    } finally {
-      document.body.removeChild(tempDiv);
-    }
+    if (stoneAssignments.length === 0) return;
+    const phone =
+      stoneAssignments.length === 1
+        ? getKarigars().find((k) => k.id === stoneAssignments[0].karigarId)
+            ?.mobile || ""
+        : "";
+    await renderAndShare(
+      generateStoneKarigarJPG(order, stoneAssignments, targets),
+      phone,
+      stoneAssignments.length,
+    );
   };
 
   return (
@@ -406,20 +565,16 @@ function ProductionOrderRow({
           <StatusBadge status={order.status} />
         </td>
         <td className="px-3 py-2 whitespace-nowrap text-xs">
-          {waxAssign ? (
-            <div className="flex items-center gap-1">
-              <Hammer size={10} className="text-orange-500 shrink-0" />
-              <span>{waxAssign.karigarName}</span>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-5 w-5 p-0 ml-1 text-green-600 hover:text-green-700"
-                onClick={handleShareWax}
-                title="Share via WhatsApp"
-              >
-                <MessageCircle size={10} />
-              </Button>
-            </div>
+          {waxAssignments.length > 0 ? (
+            <KarigarAllotmentCell
+              type="wax"
+              assignments={waxAssignments}
+              targets={targets}
+              totalPieces={totalPieces}
+              allottedPieces={waxAllottedPieces}
+              onEdit={() => setAssignType(assignType === "wax" ? null : "wax")}
+              onShare={handleShareWax}
+            />
           ) : isWaxStage ? (
             <Button
               size="sm"
@@ -434,20 +589,18 @@ function ProductionOrderRow({
           )}
         </td>
         <td className="px-3 py-2 whitespace-nowrap text-xs">
-          {stoneAssign ? (
-            <div className="flex items-center gap-1">
-              <Gem size={10} className="text-pink-500 shrink-0" />
-              <span>{stoneAssign.karigarName}</span>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-5 w-5 p-0 ml-1 text-green-600 hover:text-green-700"
-                onClick={handleShareStone}
-                title="Share via WhatsApp"
-              >
-                <MessageCircle size={10} />
-              </Button>
-            </div>
+          {stoneAssignments.length > 0 ? (
+            <KarigarAllotmentCell
+              type="stone"
+              assignments={stoneAssignments}
+              targets={targets}
+              totalPieces={totalPieces}
+              allottedPieces={stoneAllottedPieces}
+              onEdit={() =>
+                setAssignType(assignType === "stone" ? null : "stone")
+              }
+              onShare={handleShareStone}
+            />
           ) : isStoneStage ? (
             <Button
               size="sm"
@@ -526,8 +679,8 @@ export default function ProductionPage() {
     "Customer",
     "Date",
     "Status",
-    "Wax Karigar",
-    "Stone Karigar",
+    "Wax Karigar(s)",
+    "Stone Karigar(s)",
     "Actions",
   ];
 
